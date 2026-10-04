@@ -185,10 +185,10 @@
     targetAngle: 0,
     lastTickIndex: -1,
 
-    // Unique Rig Configuration PER Player
+    // Weight-based admin rigging
     adminRig: {
       active: false,
-      playerConfigs: {} // e.g. { "Player 1": [10, 0, 10...], "Player 2": [0, 100, 0...] }
+      playerConfigs: {} 
     }
   };
 
@@ -209,9 +209,9 @@
       this.peer = new Peer('FR-' + code);
       
       this.peer.on('open', (id) => {
-          elements.hostGeneratedCode.textContent = code;
+          elements.hostGeneratedCode.innerText = code;
           elements.roomStatusBadge.classList.remove('hidden');
-          document.getElementById('displayRoomCode').textContent = code;
+          document.getElementById('displayRoomCode').innerText = code;
           
           if (name !== 'Admin') state.players = [name];
           else state.players = []; 
@@ -221,12 +221,12 @@
 
       this.peer.on('connection', (conn) => {
           this.conns.push(conn);
-          document.getElementById('displayPeerCount').textContent = `${this.conns.length + 1} online`;
+          document.getElementById('displayPeerCount').innerText = `${this.conns.length + 1} online`;
           
           conn.on('data', (data) => this.handleHostData(conn, data));
           conn.on('close', () => {
               this.conns = this.conns.filter(c => c !== conn);
-              document.getElementById('displayPeerCount').textContent = `${this.conns.length + 1} online`;
+              document.getElementById('displayPeerCount').innerText = `${this.conns.length + 1} online`;
           });
       });
       
@@ -249,9 +249,9 @@
           
           conn.on('open', () => {
               conn.send({ type: 'JOIN', name: name, isAdmin: state.isAdmin });
-              elements.wheelStatusText.textContent = `Joined Room ${code}. Waiting for sync...`;
+              elements.wheelStatusText.innerText = `Joined Room ${code}. Waiting for sync...`;
               elements.roomStatusBadge.classList.remove('hidden');
-              document.getElementById('displayRoomCode').textContent = code;
+              document.getElementById('displayRoomCode').innerText = code;
               
               hideLobbyModal();
               applyGuestRestrictions();
@@ -294,89 +294,90 @@
               roundNumber: state.roundNumber
           }
       });
-    },
+    }
+  };
 
-    handleHostData: function(conn, data) {
-      switch(data.type) {
-          case 'JOIN':
-              if (!data.isAdmin) {
-                  addPlayer(data.name, true); 
-              }
-              // Send live sync to the new client
-              conn.send({
-                  type: 'FULL_STATE',
-                  state: {
-                      players: state.players,
-                      segments: state.segments,
-                      theme: state.theme,
-                      history: state.history,
-                      currentPlayerIndex: state.currentPlayerIndex,
-                      roundNumber: state.roundNumber
-                  }
-              });
-              this.broadcastState();
-              break;
-          case 'REQUEST_SPIN':
-              if (!state.isSpinning) spinWheelHostLogic(data.playerName);
-              break;
-          case 'UPDATE_SEGMENTS':
-              if (data.isAdmin) {
-                  state.segments = data.segments;
-                  renderSegmentList();
-                  this.broadcastState();
-              }
-              break;
-          case 'UPDATE_THEME':
-              if (data.isAdmin) {
-                  setTheme(data.theme, true);
-                  this.broadcastState();
-              }
-              break;
-          case 'ADVANCE_TURN':
-              if (data.isAdmin) {
-                  advanceTurn(true);
-                  this.broadcastState();
-              }
-              break;
-          case 'REMOVE_SEGMENT':
-              if (data.isAdmin) {
-                 removeSegment(data.index, true);
-              }
-              break;
-          case 'CLEAR_HISTORY':
-              if (data.isAdmin) {
-                  state.history = [];
-                  renderHistory();
-                  this.broadcastState();
-              }
-              break;
-          case 'ADMIN_RIG':
-              if (data.isAdmin) state.adminRig = data.rig;
-              break;
-      }
-    },
+  // Map Host Data Listeners
+  mp.handleHostData = function(conn, data) {
+    switch(data.type) {
+        case 'JOIN':
+            if (!data.isAdmin) {
+                addPlayer(data.name, true); 
+            }
+            conn.send({
+                type: 'FULL_STATE',
+                state: {
+                    players: state.players,
+                    segments: state.segments,
+                    theme: state.theme,
+                    history: state.history,
+                    currentPlayerIndex: state.currentPlayerIndex,
+                    roundNumber: state.roundNumber
+                }
+            });
+            this.broadcastState();
+            break;
+        case 'REQUEST_SPIN':
+            if (!state.isSpinning) spinWheelHostLogic(data.playerName);
+            break;
+        case 'UPDATE_SEGMENTS':
+            if (data.isAdmin) {
+                state.segments = data.segments;
+                renderSegmentList();
+                this.broadcastState();
+            }
+            break;
+        case 'UPDATE_THEME':
+            if (data.isAdmin) {
+                setTheme(data.theme, true);
+                this.broadcastState();
+            }
+            break;
+        case 'ADVANCE_TURN':
+            if (data.isAdmin) {
+                advanceTurn(true);
+                this.broadcastState();
+            }
+            break;
+        case 'REMOVE_SEGMENT':
+            if (data.isAdmin) {
+               removeSegment(data.index, true);
+            }
+            break;
+        case 'CLEAR_HISTORY':
+            if (data.isAdmin) {
+                state.history = [];
+                renderHistory();
+                this.broadcastState();
+            }
+            break;
+        case 'ADMIN_RIG':
+            if (data.isAdmin) state.adminRig = data.rig;
+            break;
+    }
+  };
 
-    handleJoinerData: function(data) {
-      switch(data.type) {
-          case 'FULL_STATE':
-          case 'STATE_UPDATE':
-              state.players = data.state.players;
-              state.segments = data.state.segments;
-              state.history = data.state.history;
-              state.currentPlayerIndex = data.state.currentPlayerIndex;
-              state.roundNumber = data.state.roundNumber;
-              
-              if (state.theme !== data.state.theme) setTheme(data.state.theme, true);
-              else renderSegmentList();
-              
-              updateTurnBanner();
-              renderHistory();
-              updateAdminDropdowns();
-              break;
-          case 'SPIN_START':
-              executeClientSpin(data.targetAngle, data.spinDuration, data.playerName);
-              break;
-      }
+  // Map Joiner Data Listeners
+  mp.handleJoinerData = function(data) {
+    switch(data.type) {
+        case 'FULL_STATE':
+        case 'STATE_UPDATE':
+            state.players = data.state.players;
+            state.segments = data.state.segments;
+            state.history = data.state.history;
+            state.currentPlayerIndex = data.state.currentPlayerIndex;
+            state.roundNumber = data.state.roundNumber;
+            
+            if (state.theme !== data.state.theme) setTheme(data.state.theme, true);
+            else renderSegmentList();
+            
+            updateTurnBanner();
+            renderHistory();
+            updateAdminDropdowns();
+            break;
+        case 'SPIN_START':
+            executeClientSpin(data.targetAngle, data.spinDuration, data.playerName);
+            break;
     }
   };
 
@@ -841,12 +842,21 @@
     if (state.isSpinning) return;
     if (state.segments.length < 2) {
       alert('Please add at least 2 options on the wheel to spin!');
-      elements.inputSegment.focus();
+      if(elements.inputSegment) elements.inputSegment.focus();
       return;
     }
     if (state.players.length === 0 && mp.mode !== 'join') {
       showLobbyModal();
       return;
+    }
+
+    // --- TURN LOCKING LOGIC ---
+    const currentPlayer = getCurrentPlayerName();
+    const canSpin = (mp.mode === 'local') || state.isAdmin || (mp.myName === currentPlayer);
+    
+    if (!canSpin) {
+        alert(`It's not your turn! Waiting for ${currentPlayer} to spin.`);
+        return;
     }
 
     if (mp.mode === 'join') {
@@ -931,10 +941,11 @@
     
     sound.playWhoosh();
     isAmbientActive = false; 
-    elements.btnSpin.disabled = true;
+    
+    if (elements.btnSpin) elements.btnSpin.disabled = true;
     
     const playerText = (spinnerName && spinnerName !== 'Admin') ? spinnerName : getCurrentPlayerName();
-    elements.wheelStatusText.textContent = `Spinning for ${playerText}...`;
+    elements.wheelStatusText.innerText = `Spinning for ${playerText}...`;
 
     state.startAngle = state.currentAngle;
     state.targetAngle = targetAngle;
@@ -1000,7 +1011,6 @@
   function finalizeSpin() {
     state.isSpinning = false;
     isAmbientActive = true; 
-    elements.btnSpin.disabled = false;
     animateStuds(false);
 
     const winningIndex = getActivePointerSegmentIndex(state.currentAngle);
@@ -1008,13 +1018,14 @@
     lastWinningSegment = { index: winningIndex, text: winningPrize };
 
     const currentPlayer = getCurrentPlayerName();
-    elements.wheelStatusText.textContent = `Result: ${winningPrize}!`;
-
+    
     addHistoryRecordLocal(currentPlayer, winningPrize);
     
     sound.playWinFanfare();
     triggerConfettiBurst();
     showWinnerModal(currentPlayer, winningPrize);
+    
+    updateSpinButtonState();
   }
 
   // --- PLAYERS MANAGEMENT ---
@@ -1024,11 +1035,35 @@
   }
 
   function updateTurnBanner() {
-    const playerName = getCurrentPlayerName();
-    elements.currentTurnName.textContent = playerName;
-    elements.turnAvatarInitial.textContent = playerName.charAt(0).toUpperCase() || '?';
-    elements.turnRoundBadge.textContent = `Round ${state.roundNumber}`;
-    if (elements.playerCountBadge) elements.playerCountBadge.textContent = state.players.length;
+    const playerName = getCurrentPlayerName() || 'Guest';
+    
+    // Using innerText fixes nested rendering bugs on Chromium for Windows
+    if (elements.currentTurnName) elements.currentTurnName.innerText = playerName;
+    if (elements.turnAvatarInitial) elements.turnAvatarInitial.innerText = playerName.charAt(0).toUpperCase() || '?';
+    if (elements.turnRoundBadge) elements.turnRoundBadge.innerText = `Round ${state.roundNumber}`;
+    if (elements.playerCountBadge) elements.playerCountBadge.innerText = state.players.length;
+    
+    updateSpinButtonState();
+  }
+  
+  function updateSpinButtonState() {
+    if (state.isSpinning) return;
+    
+    const currentPlayer = getCurrentPlayerName();
+    const canSpin = (mp.mode === 'local') || state.isAdmin || (mp.myName === currentPlayer);
+    
+    const hubBtn = document.getElementById('btnSpin');
+    if (hubBtn) {
+        hubBtn.disabled = !canSpin;
+        
+        if (elements.wheelStatusText) {
+            if (!canSpin) {
+                elements.wheelStatusText.innerText = `Waiting for ${currentPlayer} to spin...`;
+            } else {
+                elements.wheelStatusText.innerText = `Ready for ${currentPlayer}'s spin`;
+            }
+        }
+    }
   }
 
   function advanceTurn(fromNetwork = false) {
@@ -1039,7 +1074,6 @@
       state.roundNumber++;
     }
     updateTurnBanner();
-    elements.wheelStatusText.textContent = `Ready for ${getCurrentPlayerName()}'s spin`;
 
     if (!fromNetwork && mp.mode !== 'local') {
         if (mp.mode === 'host') mp.broadcastState();
@@ -1057,7 +1091,6 @@
   function hideLobbyModal() {
     if (elements.lobbyModal) elements.lobbyModal.classList.add('hidden');
     updateTurnBanner();
-    elements.wheelStatusText.textContent = `Ready for ${getCurrentPlayerName()}'s spin`;
   }
 
   function switchLobbyTab(tabName) {
@@ -1085,8 +1118,8 @@
   function checkAdminLogin(name) {
     if (name.trim().toLowerCase() === 'admin') {
       state.isAdmin = true;
-      elements.btnAdminSecretMenu.classList.remove('hidden');
-      elements.wheelStatusText.textContent = "Admin Stealth Rigging Unlocked.";
+      if (elements.btnAdminSecretMenu) elements.btnAdminSecretMenu.classList.remove('hidden');
+      if (elements.wheelStatusText) elements.wheelStatusText.innerText = "Admin Stealth Rigging Unlocked.";
       return true;
     }
     return false;
@@ -1113,7 +1146,7 @@
     const container = elements.localPlayersChips;
     if (!container) return;
     container.innerHTML = '';
-    elements.localPlayerCount.textContent = mp.localQueue.length;
+    elements.localPlayerCount.innerText = mp.localQueue.length;
 
     mp.localQueue.forEach((player, idx) => {
       const chip = document.createElement('div');
@@ -1208,14 +1241,13 @@
                 <span>${escapeHtml(p)}</span>
             </div>`;
       });
-      if (elements.hostPlayerCount) elements.hostPlayerCount.textContent = state.players.length;
+      if (elements.hostPlayerCount) elements.hostPlayerCount.innerText = state.players.length;
   }
 
   // --- ADMIN RIGGING UI ---
   function updateAdminPlayerDropdown() {
     if (!elements.adminSelectPlayer) return;
     
-    // Remember current selection to re-select it after re-rendering options
     const currentSelection = elements.adminSelectPlayer.value;
     
     elements.adminSelectPlayer.innerHTML = '<option value="">-- Select a Player to Rig --</option>';
@@ -1245,11 +1277,10 @@
       return;
     }
 
-    // Grab this specific player's weights. If they don't have any yet, create an array of fair '10's.
     let weights = state.adminRig.playerConfigs[targetPlayer];
     if (!weights || weights.length !== state.segments.length) {
        weights = state.segments.map(() => 10); 
-       state.adminRig.playerConfigs[targetPlayer] = weights; // Save the default fair array immediately
+       state.adminRig.playerConfigs[targetPlayer] = weights; 
     }
 
     state.segments.forEach((seg, idx) => {
@@ -1267,14 +1298,13 @@
       list.appendChild(div);
     });
 
-    // Add listeners so the slider immediately updates the player's personal config array
     const sliders = list.querySelectorAll('.adminRigSliderMulti');
     sliders.forEach(slider => {
       slider.addEventListener('input', (e) => {
         const idx = parseInt(e.target.dataset.index, 10);
         const val = parseInt(e.target.value, 10);
         state.adminRig.playerConfigs[targetPlayer][idx] = val;
-        document.getElementById(`adminRigWeightLabel_${idx}`).textContent = `Weight: ${val}`;
+        document.getElementById(`adminRigWeightLabel_${idx}`).innerText = `Weight: ${val}`;
       });
     });
   }
@@ -1300,7 +1330,7 @@
     if (!list) return;
     list.innerHTML = '';
 
-    elements.segmentCount.textContent = state.segments.length;
+    elements.segmentCount.innerText = state.segments.length;
 
     if (state.segments.length === 0) {
       elements.emptySegmentState.classList.remove('hidden');
@@ -1409,7 +1439,7 @@
     saveState();
     renderSegmentList();
     sound.playWhoosh();
-    elements.wheelStatusText.textContent = `Loaded ${count} random slices from RandomOptions.txt!`;
+    elements.wheelStatusText.innerText = `Loaded ${count} random slices from RandomOptions.txt!`;
 
     if (!fromNetwork) broadcastSegmentsChange();
   }
@@ -1467,14 +1497,14 @@
 
   // --- MODAL FLOWS ---
   function showWinnerModal(player, prize) {
-    elements.winnerPlayerBanner.textContent = `Awarded to ${player}!`;
-    elements.winnerPrizeText.textContent = prize;
+    elements.winnerPlayerBanner.innerText = `Awarded to ${player}!`;
+    elements.winnerPrizeText.innerText = prize;
     
     if (mp.mode === 'join' && !state.isAdmin) {
-        elements.btnNextTurnModal.querySelector('span').textContent = 'Close Window';
+        elements.btnNextTurnModal.querySelector('span').innerText = 'Close Window';
         elements.btnRemoveWonSegment.classList.add('hidden');
     } else {
-        elements.btnNextTurnModal.querySelector('span').textContent = 'Next Player Turn';
+        elements.btnNextTurnModal.querySelector('span').innerText = 'Next Player Turn';
         elements.btnRemoveWonSegment.classList.remove('hidden');
     }
 
@@ -1511,28 +1541,32 @@
 
   // --- EVENT LISTENERS ---
   function setupEventListeners() {
-    elements.btnSpin.addEventListener('click', spinWheel);
+    if (elements.btnSpin) elements.btnSpin.addEventListener('click', spinWheel);
 
-    elements.inputSegment.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        const value = elements.inputSegment.value;
-        if (value.trim()) {
-          addSegment(value);
-          elements.inputSegment.value = '';
-          elements.inputSegment.focus();
-        }
-      }
-    });
+    if (elements.inputSegment) {
+        elements.inputSegment.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            const value = elements.inputSegment.value;
+            if (value.trim()) {
+              addSegment(value);
+              elements.inputSegment.value = '';
+              elements.inputSegment.focus();
+            }
+          }
+        });
+    }
 
-    elements.btnAddSegment.addEventListener('click', () => {
-      const value = elements.inputSegment.value;
-      if (value.trim()) {
-        addSegment(value);
-        elements.inputSegment.value = '';
-        elements.inputSegment.focus();
-      }
-    });
+    if (elements.btnAddSegment) {
+        elements.btnAddSegment.addEventListener('click', () => {
+          const value = elements.inputSegment.value;
+          if (value.trim()) {
+            addSegment(value);
+            elements.inputSegment.value = '';
+            elements.inputSegment.focus();
+          }
+        });
+    }
 
     if (elements.btnManagePlayers) {
       elements.btnManagePlayers.addEventListener('click', showLobbyModal);
@@ -1564,18 +1598,20 @@
       elements.btnConnectJoinGame.addEventListener('click', simulateJoin);
     }
 
-    elements.btnCopyHostCode.addEventListener('click', () => {
-        navigator.clipboard.writeText(mp.roomCode || '');
-        elements.btnCopyHostCode.textContent = 'Copied!';
-        setTimeout(() => { elements.btnCopyHostCode.textContent = 'Copy Code'; }, 2000);
-    });
+    if (elements.btnCopyHostCode) {
+        elements.btnCopyHostCode.addEventListener('click', () => {
+            navigator.clipboard.writeText(mp.roomCode || '');
+            elements.btnCopyHostCode.innerText = 'Copied!';
+            setTimeout(() => { elements.btnCopyHostCode.innerText = 'Copy Code'; }, 2000);
+        });
+    }
       
     if (document.getElementById('btnCopyRoomCode')) {
         document.getElementById('btnCopyRoomCode').addEventListener('click', (e) => {
             navigator.clipboard.writeText(mp.roomCode || '');
             const btn = e.currentTarget;
-            btn.textContent = '✅';
-            setTimeout(() => { btn.textContent = '📋'; }, 2000);
+            btn.innerText = '✅';
+            setTimeout(() => { btn.innerText = '📋'; }, 2000);
         });
     }
 
@@ -1586,7 +1622,6 @@
       });
     }
     
-    // Trigger slice re-render when a different player is selected from the dropdown
     if (elements.adminSelectPlayer) {
        elements.adminSelectPlayer.addEventListener('change', () => {
            renderAdminSlices();
@@ -1631,24 +1666,32 @@
       });
     }
 
-    elements.btnNextTurnManual.addEventListener('click', () => advanceTurn());
-    elements.btnNextTurnModal.addEventListener('click', () => {
-      hideWinnerModal();
-      if (mp.mode === 'host' || mp.mode === 'local' || state.isAdmin) {
-        advanceTurn();
-      }
-    });
+    if (elements.btnNextTurnManual) {
+        elements.btnNextTurnManual.addEventListener('click', () => advanceTurn());
+    }
+    if (elements.btnNextTurnModal) {
+        elements.btnNextTurnModal.addEventListener('click', () => {
+          hideWinnerModal();
+          if (mp.mode === 'host' || mp.mode === 'local' || state.isAdmin) {
+            advanceTurn();
+          }
+        });
+    }
 
-    elements.btnRemoveWonSegment.addEventListener('click', () => {
-      if (lastWinningSegment && lastWinningSegment.index !== null) {
-        removeSegment(lastWinningSegment.index);
-        lastWinningSegment = null;
-      }
-      hideWinnerModal();
-      advanceTurn();
-    });
+    if (elements.btnRemoveWonSegment) {
+        elements.btnRemoveWonSegment.addEventListener('click', () => {
+          if (lastWinningSegment && lastWinningSegment.index !== null) {
+            removeSegment(lastWinningSegment.index);
+            lastWinningSegment = null;
+          }
+          hideWinnerModal();
+          advanceTurn();
+        });
+    }
 
-    elements.btnShuffleSegments.addEventListener('click', () => shuffleSegments());
+    if (elements.btnShuffleSegments) {
+        elements.btnShuffleSegments.addEventListener('click', () => shuffleSegments());
+    }
 
     if (elements.btnRandomOptions) {
       elements.btnRandomOptions.addEventListener('click', () => applyRandomOptions());
@@ -1657,34 +1700,44 @@
       elements.btnRandomOptionsSide.addEventListener('click', () => applyRandomOptions());
     }
 
-    elements.btnClearSegments.addEventListener('click', () => {
-      if (confirm('Clear all options from the wheel?')) {
-        state.segments = [];
-        saveState();
-        renderSegmentList();
-        broadcastSegmentsChange();
-      }
-    });
+    if (elements.btnClearSegments) {
+        elements.btnClearSegments.addEventListener('click', () => {
+          if (confirm('Clear all options from the wheel?')) {
+            state.segments = [];
+            saveState();
+            renderSegmentList();
+            broadcastSegmentsChange();
+          }
+        });
+    }
 
-    elements.btnResetDefault.addEventListener('click', () => {
-      state.segments = [...PRESETS.casino];
-      saveState();
-      renderSegmentList();
-      broadcastSegmentsChange();
-    });
+    if (elements.btnResetDefault) {
+        elements.btnResetDefault.addEventListener('click', () => {
+          state.segments = [...PRESETS.casino];
+          saveState();
+          renderSegmentList();
+          broadcastSegmentsChange();
+        });
+    }
 
-    elements.btnClearHistory.addEventListener('click', () => {
-      state.history = [];
-      renderHistory();
-      if (mp.mode === 'host') {
-          mp.broadcastState();
-      } else if (mp.mode === 'join' && state.isAdmin) {
-          mp.broadcast({ type: 'CLEAR_HISTORY', isAdmin: true });
-      }
-    });
+    if (elements.btnClearHistory) {
+        elements.btnClearHistory.addEventListener('click', () => {
+          state.history = [];
+          renderHistory();
+          if (mp.mode === 'host') {
+              mp.broadcastState();
+          } else if (mp.mode === 'join' && state.isAdmin) {
+              mp.broadcast({ type: 'CLEAR_HISTORY', isAdmin: true });
+          }
+        });
+    }
 
-    elements.btnPresetsModalOpen.addEventListener('click', showPresetsModal);
-    elements.btnClosePresets.addEventListener('click', hidePresetsModal);
+    if (elements.btnPresetsModalOpen) {
+        elements.btnPresetsModalOpen.addEventListener('click', showPresetsModal);
+    }
+    if (elements.btnClosePresets) {
+        elements.btnClosePresets.addEventListener('click', hidePresetsModal);
+    }
     document.querySelectorAll('.preset-card').forEach((card) => {
       card.addEventListener('click', () => {
         const key = card.dataset.preset;
@@ -1692,17 +1745,19 @@
       });
     });
 
-    elements.btnSoundToggle.addEventListener('click', () => {
-      sound.enabled = !sound.enabled;
-      if (sound.enabled) {
-        elements.soundOnIcon.classList.remove('hidden');
-        elements.soundOffIcon.classList.add('hidden');
-        sound.playTick(1.2);
-      } else {
-        elements.soundOnIcon.classList.add('hidden');
-        elements.soundOffIcon.classList.remove('hidden');
-      }
-    });
+    if (elements.btnSoundToggle) {
+        elements.btnSoundToggle.addEventListener('click', () => {
+          sound.enabled = !sound.enabled;
+          if (sound.enabled) {
+            elements.soundOnIcon.classList.remove('hidden');
+            elements.soundOffIcon.classList.add('hidden');
+            sound.playTick(1.2);
+          } else {
+            elements.soundOnIcon.classList.add('hidden');
+            elements.soundOffIcon.classList.remove('hidden');
+          }
+        });
+    }
 
     [elements.lobbyModal, elements.presetsModal, elements.adminModal].forEach((overlay) => {
       if(overlay) {
