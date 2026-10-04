@@ -320,6 +320,9 @@
         case 'REQUEST_SPIN':
             if (!state.isSpinning) spinWheelHostLogic(data.playerName);
             break;
+        case 'REQUEST_ADVANCE_TURN':
+            advanceTurn(); // Host advances and broadcasts
+            break;
         case 'UPDATE_SEGMENTS':
             if (data.isAdmin) {
                 state.segments = data.segments;
@@ -880,11 +883,9 @@
     // ----- INDIVIDUAL PLAYER RIGGING INJECTION -----
     const playerWhosTurnItIs = getCurrentPlayerName();
     
-    // Only check if rigging is active globally, AND if there are custom weights saved for the current player
     if (state.adminRig.active && state.adminRig.playerConfigs[playerWhosTurnItIs]) {
       const weights = state.adminRig.playerConfigs[playerWhosTurnItIs];
       
-      // Ensure the wheel hasn't structurally changed since weights were saved
       if (weights && weights.length === state.segments.length) {
         
         let totalWeight = weights.reduce((a, b) => a + b, 0);
@@ -894,7 +895,6 @@
           let currentWeightSum = 0;
           let targetSliceIndex = 0;
 
-          // Select the item based on the specific player's slider configuration
           for (let i = 0; i < weights.length; i++) {
             currentWeightSum += weights[i];
             if (randomRoll < currentWeightSum) {
@@ -903,7 +903,6 @@
             }
           }
 
-          // Force the math to stop safely inside the targeted slice
           let arc = (Math.PI * 2) / state.segments.length;
           let sliceOffset = (arc * 0.1) + Math.random() * (arc * 0.8);
           let requiredRotation = (3 * Math.PI / 2) - (targetSliceIndex * arc) - sliceOffset;
@@ -1037,7 +1036,6 @@
   function updateTurnBanner() {
     const playerName = getCurrentPlayerName() || 'Guest';
     
-    // Using innerText fixes nested rendering bugs on Chromium for Windows
     if (elements.currentTurnName) elements.currentTurnName.innerText = playerName;
     if (elements.turnAvatarInitial) elements.turnAvatarInitial.innerText = playerName.charAt(0).toUpperCase() || '?';
     if (elements.turnRoundBadge) elements.turnRoundBadge.innerText = `Round ${state.roundNumber}`;
@@ -1133,7 +1131,7 @@
         return;
     }
     mp.localQueue.push(clean);
-    elements.inputLocalPlayerName.value = '';
+    if (elements.inputLocalPlayerName) elements.inputLocalPlayerName.value = '';
     renderLocalPlayerChips();
   }
 
@@ -1146,7 +1144,7 @@
     const container = elements.localPlayersChips;
     if (!container) return;
     container.innerHTML = '';
-    elements.localPlayerCount.innerText = mp.localQueue.length;
+    if (elements.localPlayerCount) elements.localPlayerCount.innerText = mp.localQueue.length;
 
     mp.localQueue.forEach((player, idx) => {
       const chip = document.createElement('div');
@@ -1165,7 +1163,7 @@
   }
 
   function startLocalGame() {
-    const name = elements.inputYourName.value.trim();
+    const name = elements.inputYourName ? elements.inputYourName.value.trim() : '';
     if (checkAdminLogin(name)) return hideLobbyModal();
     
     if (mp.localQueue.length > 0) {
@@ -1213,8 +1211,10 @@
         state.isAdmin = false;
     }
 
-    elements.btnConnectJoinGame.disabled = true;
-    elements.btnConnectJoinGame.innerHTML = '<span>CONNECTING...</span>';
+    if (elements.btnConnectJoinGame) {
+        elements.btnConnectJoinGame.disabled = true;
+        elements.btnConnectJoinGame.innerHTML = '<span>CONNECTING...</span>';
+    }
 
     mp.initJoin(mp.myName, code);
   }
@@ -1330,15 +1330,15 @@
     if (!list) return;
     list.innerHTML = '';
 
-    elements.segmentCount.innerText = state.segments.length;
+    if (elements.segmentCount) elements.segmentCount.innerText = state.segments.length;
 
     if (state.segments.length === 0) {
-      elements.emptySegmentState.classList.remove('hidden');
+      if (elements.emptySegmentState) elements.emptySegmentState.classList.remove('hidden');
       invalidateWheelCache();
       return;
     }
 
-    elements.emptySegmentState.classList.add('hidden');
+    if (elements.emptySegmentState) elements.emptySegmentState.classList.add('hidden');
     const isGuest = mp.mode === 'join' && !state.isAdmin;
     const palette = getCurrentPalette();
 
@@ -1380,7 +1380,7 @@
     saveState();
     renderSegmentList();
 
-    const container = elements.segmentList.parentElement;
+    const container = elements.segmentList ? elements.segmentList.parentElement : null;
     if (container) container.scrollTop = container.scrollHeight;
 
     if (!fromNetwork) broadcastSegmentsChange();
@@ -1439,7 +1439,7 @@
     saveState();
     renderSegmentList();
     sound.playWhoosh();
-    elements.wheelStatusText.innerText = `Loaded ${count} random slices from RandomOptions.txt!`;
+    if (elements.wheelStatusText) elements.wheelStatusText.innerText = `Loaded ${count} random slices from RandomOptions.txt!`;
 
     if (!fromNetwork) broadcastSegmentsChange();
   }
@@ -1497,30 +1497,36 @@
 
   // --- MODAL FLOWS ---
   function showWinnerModal(player, prize) {
-    elements.winnerPlayerBanner.innerText = `Awarded to ${player}!`;
-    elements.winnerPrizeText.innerText = prize;
+    if (elements.winnerPlayerBanner) elements.winnerPlayerBanner.innerText = `Awarded to ${player}!`;
+    if (elements.winnerPrizeText) elements.winnerPrizeText.innerText = prize;
     
-    if (mp.mode === 'join' && !state.isAdmin) {
-        elements.btnNextTurnModal.querySelector('span').innerText = 'Close Window';
-        elements.btnRemoveWonSegment.classList.add('hidden');
-    } else {
+    // Everyone sees Next Player Turn text
+    if (elements.btnNextTurnModal && elements.btnNextTurnModal.querySelector('span')) {
         elements.btnNextTurnModal.querySelector('span').innerText = 'Next Player Turn';
-        elements.btnRemoveWonSegment.classList.remove('hidden');
     }
 
-    elements.winnerModal.classList.remove('hidden');
+    // Only host or admin can remove slices
+    if (elements.btnRemoveWonSegment) {
+        if (mp.mode === 'join' && !state.isAdmin) {
+            elements.btnRemoveWonSegment.classList.add('hidden');
+        } else {
+            elements.btnRemoveWonSegment.classList.remove('hidden');
+        }
+    }
+
+    if (elements.winnerModal) elements.winnerModal.classList.remove('hidden');
   }
 
   function hideWinnerModal() {
-    elements.winnerModal.classList.add('hidden');
+    if (elements.winnerModal) elements.winnerModal.classList.add('hidden');
   }
 
   function showPresetsModal() {
-    elements.presetsModal.classList.remove('hidden');
+    if (elements.presetsModal) elements.presetsModal.classList.remove('hidden');
   }
 
   function hidePresetsModal() {
-    elements.presetsModal.classList.add('hidden');
+    if (elements.presetsModal) elements.presetsModal.classList.add('hidden');
   }
 
   function loadPreset(key) {
@@ -1669,11 +1675,16 @@
     if (elements.btnNextTurnManual) {
         elements.btnNextTurnManual.addEventListener('click', () => advanceTurn());
     }
+
     if (elements.btnNextTurnModal) {
         elements.btnNextTurnModal.addEventListener('click', () => {
           hideWinnerModal();
-          if (mp.mode === 'host' || mp.mode === 'local' || state.isAdmin) {
-            advanceTurn();
+          
+          if (mp.mode === 'join' && !state.isAdmin) {
+             // Ask Host to advance the turn
+             mp.broadcast({ type: 'REQUEST_ADVANCE_TURN' });
+          } else {
+             advanceTurn();
           }
         });
     }
