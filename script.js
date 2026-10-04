@@ -185,11 +185,10 @@
     targetAngle: 0,
     lastTickIndex: -1,
 
-    // Weight-based admin rigging
+    // Unique Rig Configuration PER Player
     adminRig: {
       active: false,
-      targetPlayer: '',
-      weights: [] // Will automatically populate with values based on slice count
+      playerConfigs: {} // e.g. { "Player 1": [10, 0, 10...], "Player 2": [0, 100, 0...] }
     }
   };
 
@@ -827,7 +826,7 @@
     renderAdminSlices();
   }
 
-  // --- PHYSICS ENGINE & WEIGHT-BASED RIGGING ---
+  // --- PHYSICS ENGINE & PLAYER-SPECIFIC RIGGING ---
   function getActivePointerSegmentIndex(currentAngle) {
     if (state.segments.length === 0) return 0;
     const total = state.segments.length;
@@ -866,12 +865,16 @@
     const randomAngleOffset = Math.random() * Math.PI * 2;
 
     state.startAngle = state.currentAngle;
-    let targetAngleFinal = state.startAngle + turns * Math.PI * 2 + randomAngleOffset;
+    let targetAngleFinal = state.startAngle + turns * Math.PI * 2 + randomAngleOffset; // Default perfectly fair spin
 
-    // ----- WEIGHT-BASED ADMIN RIGGING INJECTION -----
-    const playerToRig = getCurrentPlayerName();
-    if (state.adminRig.active && state.adminRig.targetPlayer === playerToRig) {
-      const weights = state.adminRig.weights;
+    // ----- INDIVIDUAL PLAYER RIGGING INJECTION -----
+    const playerWhosTurnItIs = getCurrentPlayerName();
+    
+    // Only check if rigging is active globally, AND if there are custom weights saved for the current player
+    if (state.adminRig.active && state.adminRig.playerConfigs[playerWhosTurnItIs]) {
+      const weights = state.adminRig.playerConfigs[playerWhosTurnItIs];
+      
+      // Ensure the wheel hasn't structurally changed since weights were saved
       if (weights && weights.length === state.segments.length) {
         
         let totalWeight = weights.reduce((a, b) => a + b, 0);
@@ -881,7 +884,7 @@
           let currentWeightSum = 0;
           let targetSliceIndex = 0;
 
-          // Select the weighted item
+          // Select the item based on the specific player's slider configuration
           for (let i = 0; i < weights.length; i++) {
             currentWeightSum += weights[i];
             if (randomRoll < currentWeightSum) {
@@ -890,6 +893,7 @@
             }
           }
 
+          // Force the math to stop safely inside the targeted slice
           let arc = (Math.PI * 2) / state.segments.length;
           let sliceOffset = (arc * 0.1) + Math.random() * (arc * 0.8);
           let requiredRotation = (3 * Math.PI / 2) - (targetSliceIndex * arc) - sliceOffset;
@@ -1088,7 +1092,6 @@
     return false;
   }
 
-  // Local Play
   function addLocalPlayer(name) {
     const clean = name.trim();
     if (!clean) return;
@@ -1211,13 +1214,17 @@
   // --- ADMIN RIGGING UI ---
   function updateAdminPlayerDropdown() {
     if (!elements.adminSelectPlayer) return;
-    elements.adminSelectPlayer.innerHTML = '<option value="">-- No Rigging (Fair Spin) --</option>';
+    
+    // Remember current selection to re-select it after re-rendering options
+    const currentSelection = elements.adminSelectPlayer.value;
+    
+    elements.adminSelectPlayer.innerHTML = '<option value="">-- Select a Player to Rig --</option>';
     state.players.forEach(p => {
       elements.adminSelectPlayer.innerHTML += `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`;
     });
     
-    if (state.adminRig.targetPlayer && state.players.includes(state.adminRig.targetPlayer)) {
-      elements.adminSelectPlayer.value = state.adminRig.targetPlayer;
+    if (currentSelection && state.players.includes(currentSelection)) {
+      elements.adminSelectPlayer.value = currentSelection;
     }
   }
 
@@ -1225,19 +1232,28 @@
     const list = elements.adminSlicesList;
     if (!list) return;
     list.innerHTML = '';
+
+    const targetPlayer = elements.adminSelectPlayer.value;
     
+    if (!targetPlayer) {
+        list.innerHTML = `<div style="color: #64748b; font-size: 0.85rem; padding: 10px; text-align: center;">Select a player from the dropdown above to edit their chances.</div>`;
+        return;
+    }
+
     if (state.segments.length === 0) {
       list.innerHTML = `<div style="color: #64748b; font-size: 0.8rem; padding: 10px;">No slices on the wheel to rig.</div>`;
       return;
     }
 
-    // Default weight is 10 for a completely fair spin
-    if (!state.adminRig.weights || state.adminRig.weights.length !== state.segments.length) {
-       state.adminRig.weights = state.segments.map(() => 10); 
+    // Grab this specific player's weights. If they don't have any yet, create an array of fair '10's.
+    let weights = state.adminRig.playerConfigs[targetPlayer];
+    if (!weights || weights.length !== state.segments.length) {
+       weights = state.segments.map(() => 10); 
+       state.adminRig.playerConfigs[targetPlayer] = weights; // Save the default fair array immediately
     }
 
     state.segments.forEach((seg, idx) => {
-      const weight = state.adminRig.weights[idx];
+      const weight = weights[idx];
       const div = document.createElement('div');
       div.style.cssText = "padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.05); margin-bottom: 5px; background: rgba(0,0,0,0.2); border-radius: 6px;";
       
@@ -1251,12 +1267,13 @@
       list.appendChild(div);
     });
 
+    // Add listeners so the slider immediately updates the player's personal config array
     const sliders = list.querySelectorAll('.adminRigSliderMulti');
     sliders.forEach(slider => {
       slider.addEventListener('input', (e) => {
         const idx = parseInt(e.target.dataset.index, 10);
         const val = parseInt(e.target.value, 10);
-        state.adminRig.weights[idx] = val;
+        state.adminRig.playerConfigs[targetPlayer][idx] = val;
         document.getElementById(`adminRigWeightLabel_${idx}`).textContent = `Weight: ${val}`;
       });
     });
@@ -1380,7 +1397,6 @@
     const pool = await fetchRandomOptionsPool();
     if (!pool || pool.length === 0) return;
 
-    // Shuffle & Pick Exactly 10
     const shuffled = [...pool];
     for (let i = shuffled.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -1570,30 +1586,42 @@
       });
     }
     
+    // Trigger slice re-render when a different player is selected from the dropdown
+    if (elements.adminSelectPlayer) {
+       elements.adminSelectPlayer.addEventListener('change', () => {
+           renderAdminSlices();
+       });
+    }
+
     if (elements.btnCloseAdminModal) {
       elements.btnCloseAdminModal.addEventListener('click', () => elements.adminModal.classList.add('hidden'));
     }
 
     if (elements.btnAdminEqualChances) {
       elements.btnAdminEqualChances.addEventListener('click', () => {
-        state.adminRig.active = false;
-        if (state.segments) {
-            state.adminRig.weights = state.segments.map(() => 10);
+        const targetPlayer = elements.adminSelectPlayer.value;
+        if (targetPlayer && state.adminRig.playerConfigs[targetPlayer]) {
+            state.adminRig.playerConfigs[targetPlayer] = state.segments.map(() => 10);
+            renderAdminSlices();
+            alert(`Reset ${targetPlayer}'s chances to standard fair spins.`);
+        } else {
+            state.adminRig.playerConfigs = {};
+            state.adminRig.active = false;
+            renderAdminSlices();
+            alert('All rigging cleared globally.');
         }
-        renderAdminSlices();
-        alert('Wheel rigging disabled. Fair spins active.');
       });
     }
 
     if (elements.btnSaveAdminChances) {
       elements.btnSaveAdminChances.addEventListener('click', () => {
-        state.adminRig.targetPlayer = elements.adminSelectPlayer.value;
-        if (!state.adminRig.targetPlayer) {
+        const targetPlayer = elements.adminSelectPlayer.value;
+        if (!targetPlayer) {
           state.adminRig.active = false;
           alert('Rigging disabled (No player selected).');
         } else {
           state.adminRig.active = true;
-          alert(`Wheel is rigged! ${state.adminRig.targetPlayer}'s spins will use your custom weights.`);
+          alert(`Wheel is rigged! ${targetPlayer}'s spins will use your custom weights. Other players will have perfectly fair spins.`);
         }
         elements.adminModal.classList.add('hidden');
 
