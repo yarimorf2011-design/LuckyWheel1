@@ -185,11 +185,11 @@
     targetAngle: 0,
     lastTickIndex: -1,
 
+    // Weight-based admin rigging
     adminRig: {
       active: false,
       targetPlayer: '',
-      targetSliceIndex: 0,
-      chance: 100
+      weights: [] // Will automatically populate with values based on slice count
     }
   };
 
@@ -827,7 +827,7 @@
     renderAdminSlices();
   }
 
-  // --- PHYSICS ENGINE & SYNCED RIGGING ---
+  // --- PHYSICS ENGINE & WEIGHT-BASED RIGGING ---
   function getActivePointerSegmentIndex(currentAngle) {
     if (state.segments.length === 0) return 0;
     const total = state.segments.length;
@@ -842,6 +842,7 @@
     if (state.isSpinning) return;
     if (state.segments.length < 2) {
       alert('Please add at least 2 options on the wheel to spin!');
+      elements.inputSegment.focus();
       return;
     }
     if (state.players.length === 0 && mp.mode !== 'join') {
@@ -867,13 +868,28 @@
     state.startAngle = state.currentAngle;
     let targetAngleFinal = state.startAngle + turns * Math.PI * 2 + randomAngleOffset;
 
-    // Admin Rigging Calculation (Host Side Only)
+    // ----- WEIGHT-BASED ADMIN RIGGING INJECTION -----
     const playerToRig = getCurrentPlayerName();
     if (state.adminRig.active && state.adminRig.targetPlayer === playerToRig) {
-      const chance = state.adminRig.chance; 
-      if (Math.random() * 100 <= chance) {
-        let targetSliceIndex = state.adminRig.targetSliceIndex;
-        if (targetSliceIndex >= 0 && targetSliceIndex < state.segments.length) {
+      const weights = state.adminRig.weights;
+      if (weights && weights.length === state.segments.length) {
+        
+        let totalWeight = weights.reduce((a, b) => a + b, 0);
+        if (totalWeight > 0) {
+          
+          let randomRoll = Math.random() * totalWeight;
+          let currentWeightSum = 0;
+          let targetSliceIndex = 0;
+
+          // Select the weighted item
+          for (let i = 0; i < weights.length; i++) {
+            currentWeightSum += weights[i];
+            if (randomRoll < currentWeightSum) {
+              targetSliceIndex = i;
+              break;
+            }
+          }
+
           let arc = (Math.PI * 2) / state.segments.length;
           let sliceOffset = (arc * 0.1) + Math.random() * (arc * 0.8);
           let requiredRotation = (3 * Math.PI / 2) - (targetSliceIndex * arc) - sliceOffset;
@@ -890,6 +906,7 @@
         }
       }
     }
+    // -----------------------------------
 
     const spinDuration = 4800 + Math.random() * 1000;
 
@@ -1117,6 +1134,7 @@
     
     if (mp.localQueue.length > 0) {
       state.players = [...mp.localQueue];
+      saveState();
     } else {
       if (name && name.toLowerCase() !== 'admin') {
           state.players = [name];
@@ -1127,7 +1145,6 @@
     hideLobbyModal();
   }
 
-  // Host & Join Simulation Triggers
   function simulateHost() {
     const name = elements.inputYourName.value.trim();
     if (!name) return alert("Enter your name first!");
@@ -1214,41 +1231,35 @@
       return;
     }
 
+    // Default weight is 10 for a completely fair spin
+    if (!state.adminRig.weights || state.adminRig.weights.length !== state.segments.length) {
+       state.adminRig.weights = state.segments.map(() => 10); 
+    }
+
     state.segments.forEach((seg, idx) => {
-      const isSelected = (state.adminRig.targetSliceIndex === idx);
+      const weight = state.adminRig.weights[idx];
       const div = document.createElement('div');
-      div.style.cssText = "display: flex; align-items: center; justify-content: space-between; padding: 8px; border-bottom: 1px solid rgba(255,255,255,0.05); margin-bottom: 5px;";
+      div.style.cssText = "padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.05); margin-bottom: 5px; background: rgba(0,0,0,0.2); border-radius: 6px;";
       
       div.innerHTML = `
-        <div style="display: flex; align-items: center; gap: 10px; flex: 1;">
-          <input type="radio" name="adminTargetSlice" id="rig_slice_${idx}" value="${idx}" ${isSelected ? 'checked' : ''} style="accent-color: #ef4444; width: 16px; height: 16px; cursor: pointer;">
-          <label for="rig_slice_${idx}" style="color: white; font-size: 0.85rem; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px;">${escapeHtml(seg)}</label>
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+          <label style="color: white; font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; font-weight: bold;">${escapeHtml(seg)}</label>
+          <span id="adminRigWeightLabel_${idx}" style="color: #ef4444; font-weight: bold; font-size: 0.85rem; background: rgba(239, 68, 68, 0.15); padding: 2px 8px; border-radius: 4px;">Weight: ${weight}</span>
         </div>
-        ${isSelected ? `
-        <div style="display: flex; align-items: center; gap: 5px;">
-          <input type="range" id="adminRigSlider" min="0" max="100" value="${state.adminRig.chance}" style="width: 80px; accent-color: #ef4444;">
-          <span id="adminRigPercent" style="color: #ef4444; font-weight: bold; font-size: 0.8rem; width: 30px; text-align: right;">${state.adminRig.chance}%</span>
-        </div>` : `<span style="color: #64748b; font-size: 0.75rem;">(Fair)</span>`}
+        <input type="range" class="adminRigSliderMulti" data-index="${idx}" min="0" max="100" value="${weight}" style="width: 100%; accent-color: #ef4444; cursor: pointer;">
       `;
       list.appendChild(div);
     });
 
-    const radios = list.querySelectorAll('input[type="radio"]');
-    radios.forEach(radio => {
-      radio.addEventListener('change', (e) => {
-        state.adminRig.targetSliceIndex = parseInt(e.target.value, 10);
-        renderAdminSlices(); 
+    const sliders = list.querySelectorAll('.adminRigSliderMulti');
+    sliders.forEach(slider => {
+      slider.addEventListener('input', (e) => {
+        const idx = parseInt(e.target.dataset.index, 10);
+        const val = parseInt(e.target.value, 10);
+        state.adminRig.weights[idx] = val;
+        document.getElementById(`adminRigWeightLabel_${idx}`).textContent = `Weight: ${val}`;
       });
     });
-
-    const slider = document.getElementById('adminRigSlider');
-    const display = document.getElementById('adminRigPercent');
-    if (slider && display) {
-      slider.addEventListener('input', (e) => {
-        state.adminRig.chance = parseInt(e.target.value, 10);
-        display.textContent = `${state.adminRig.chance}%`;
-      });
-    }
   }
 
   function updateAdminDropdowns() {
@@ -1377,7 +1388,7 @@
     }
 
     const count = Math.min(10, shuffled.length);
-    state.segments = shuffled.slice(0, count);
+    state.segments = shuffled.slice(0, count); 
 
     saveState();
     renderSegmentList();
@@ -1443,7 +1454,6 @@
     elements.winnerPlayerBanner.textContent = `Awarded to ${player}!`;
     elements.winnerPrizeText.textContent = prize;
     
-    // Restrictions for guests
     if (mp.mode === 'join' && !state.isAdmin) {
         elements.btnNextTurnModal.querySelector('span').textContent = 'Close Window';
         elements.btnRemoveWonSegment.classList.add('hidden');
@@ -1567,7 +1577,10 @@
     if (elements.btnAdminEqualChances) {
       elements.btnAdminEqualChances.addEventListener('click', () => {
         state.adminRig.active = false;
-        state.adminRig.chance = 100;
+        if (state.segments) {
+            state.adminRig.weights = state.segments.map(() => 10);
+        }
+        renderAdminSlices();
         alert('Wheel rigging disabled. Fair spins active.');
       });
     }
@@ -1580,7 +1593,7 @@
           alert('Rigging disabled (No player selected).');
         } else {
           state.adminRig.active = true;
-          alert(`Wheel is rigged! ${state.adminRig.targetPlayer} has a ${state.adminRig.chance}% chance to land on your selected option!`);
+          alert(`Wheel is rigged! ${state.adminRig.targetPlayer}'s spins will use your custom weights.`);
         }
         elements.adminModal.classList.add('hidden');
 
