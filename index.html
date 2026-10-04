@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Golden Wheel | Luxury Spin & Win</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <!-- PeerJS for WebRTC Multiplayer (Peer-to-Peer Room Sync) -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+</head>
+<body>
+  <!-- Ambient Gold Atmosphere Background -->
+  <div class="luxury-bg">
+    <canvas id="ambientCanvas"></canvas>
+  </div>
+
+  <!-- Main App Shell -->
+  <div class="app-container">
+    
+    <!-- Top Navigation / Header -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-crest">
+          <svg viewBox="0 0 24 24" class="crest-icon">
+            <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-title">FORTUNA ROYALE</span>
+          <span class="brand-subtitle">GOLD EDITION</span>
+        </div>
+      </div>
+
+      <!-- Turn Indicator Banner (Center-Top) -->
+      <div class="turn-banner" id="turnBanner">
+        <div class="turn-avatar" id="turnAvatar">
+          <span id="turnAvatarInitial">?</span>
+        </div>
+        <div class="turn-info">
+          <div class="turn-tagline">CURRENT TURN</div>
+          <div class="turn-name" id="currentTurnName">No Players Set</div>
+        </div>
+        <div class="turn-round-pill" id="turnRoundBadge">Round 1</div>
+        <button class="icon-btn-micro" id="btnNextTurnManual" title="Pass turn to next player">
+          <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z"/></svg>
+        </button>
+      </div>
+
+      <!-- 3 Style Theme Switcher -->
+      <div class="style-switcher" id="styleSwitcher">
+        <span class="switcher-label">STYLE:</span>
+        <div class="style-options">
+          <button class="style-pill active" data-theme="royalGold" title="Royal Gold (Classic Obsidian & Gold)">
+            <span class="style-dot dot-gold"></span>
+            <span class="style-name">Royal Gold</span>
+          </button>
+          <button class="style-pill" data-theme="emeraldDynasty" title="Emerald Gold (Imperial Jade & Gold)">
+            <span class="style-dot dot-emerald"></span>
+            <span class="style-name">Emerald Gold</span>
+          </button>
+          <button class="style-pill" data-theme="rubySovereign" title="Ruby Gold (Royal Velvet Crimson & Gold)">
+            <span class="style-dot dot-ruby"></span>
+            <span class="style-name">Ruby Gold</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Header Action Controls & Room Badge -->
+      <div class="header-actions">
+        <!-- Room Code Badge (Visible when in room) -->
+        <div class="room-status-badge hidden" id="roomStatusBadge">
+          <span class="room-code-tag">ROOM: <strong id="displayRoomCode">----</strong></span>
+          <button class="btn-copy-code-sm" id="btnCopyRoomCode" title="Copy Room Code">📋</button>
+          <span class="room-peers-count" id="displayPeerCount">1 online</span>
+        </div>
+
+        <!-- Secret Admin Stealth Rigging Button -->
+        <button class="btn-admin-secret hidden" id="btnAdminSecretMenu" title="Open Secret Rigging Menu">
+          <span class="admin-pulse"></span>
+          <span>🛡️ RIGGING CONSOLE</span>
+        </button>
+
+        <button class="btn-luxury-sm" id="btnManagePlayers">
+          <svg viewBox="0 0 24 24" width="16" height="16" class="btn-svg"><path fill="currentColor" d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+          <span id="playerBadgeText">Players (<span id="playerCountBadge">0</span>)</span>
+        </button>
+
+        <button class="icon-btn" id="btnSoundToggle" title="Toggle Sound">
+          <svg id="soundOnIcon" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+          <svg id="soundOffIcon" class="hidden" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace: Stage with Wheel & Side Control Panel -->
+    <main class="main-stage">
+      
+      <!-- Center: Wheel Stage -->
+      <section class="wheel-section">
+        <div class="wheel-stage-wrapper">
+          
+          <!-- Golden Ticker / Pointer at top -->
+          <div class="wheel-ticker-assembly">
+            <div class="ticker-jewel"></div>
+            <div class="ticker-pointer" id="tickerPointer"></div>
+          </div>
+
+          <!-- The Wheel Canvas Frame -->
+          <div class="wheel-outer-ring">
+            <div class="studs-ring" id="studsRing"></div>
+            <canvas id="wheelCanvas" width="800" height="800"></canvas>
+            
+            <!-- Center Spin Hub Button -->
+            <button class="wheel-center-hub" id="btnSpin">
+              <div class="hub-shimmer"></div>
+              <div class="hub-inner-ring">
+                <span class="hub-label">SPIN</span>
+                <span class="hub-sublabel">GOLD</span>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <!-- Wheel Quick Bar Underneath -->
+        <div class="wheel-quickbar">
+          <div class="quick-status">
+            <span class="pulse-dot"></span>
+            <span id="wheelStatusText">Ready for spin</span>
+          </div>
+          <div class="quickbar-buttons">
+            <button class="btn-glass btn-highlight-gold" id="btnRandomOptions" title="Pick 10 random slices from RandomOptions.txt">
+              <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM7 7.5c.83 0 1.5.67 1.5 1.5S7.83 10.5 7 10.5 5.5 9.83 5.5 9 6.17 7.5 7 7.5zm0 9c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm5-4.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm5 4.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm0-6c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
+              Random Options
+            </button>
+            <button class="btn-glass" id="btnShuffleSegments" title="Shuffle item positions">
+              <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></svg>
+              Shuffle
+            </button>
+            <button class="btn-glass" id="btnPresetsModalOpen" title="Choose ready-made presets">
+              <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 3c1.93 0 3.5 1.57 3.5 3.5S13.93 13 12 13s-3.5-1.57-3.5-3.5S10.07 6 12 6zm7 13H5v-.23c0-.62.28-1.2.76-1.58C7.47 15.82 9.64 15 12 15s4.53.82 6.24 2.19c.48.38.76.97.76 1.58V19z"/></svg>
+              Presets
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Side: Items / Segments Manager Panel -->
+      <aside class="side-panel">
+        <div class="panel-card">
+          <div class="panel-header">
+            <div class="panel-title-group">
+              <div class="panel-badge">WHEEL SLICES</div>
+              <h2 class="panel-title">Wheel Options</h2>
+            </div>
+            <div class="panel-count-badge">
+              <span id="segmentCount">0</span> items
+            </div>
+          </div>
+
+          <!-- Quick Fast-Add Input -->
+          <div class="fast-input-wrapper">
+            <label for="inputSegment" class="input-label">Add Entry (Press Enter for next)</label>
+            <div class="fast-input-box">
+              <div class="input-icon">✦</div>
+              <input 
+                type="text" 
+                id="inputSegment" 
+                placeholder="Type prize or option, then hit Enter..." 
+                autocomplete="off" 
+                maxlength="40"
+              />
+              <button class="btn-gold-add" id="btnAddSegment" title="Add slice to wheel">
+                <span>Add</span>
+                <kbd>↵</kbd>
+              </button>
+            </div>
+            <p class="input-hint">Type item & hit <kbd>Enter</kbd> to add continuously without leaving keyboard.</p>
+          </div>
+
+          <!-- Segment List -->
+          <div class="segment-list-container">
+            <div class="segment-list" id="segmentList">
+              <!-- Dynamically populated -->
+            </div>
+            <div class="empty-state hidden" id="emptySegmentState">
+              <div class="empty-icon">🪙</div>
+              <p>Wheel is currently empty</p>
+              <span>Add custom entries above or load a preset!</span>
+            </div>
+          </div>
+
+          <!-- Bottom Panel Controls -->
+          <div class="panel-footer">
+            <button class="btn-outline-danger" id="btnClearSegments">
+              <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+              Clear All
+            </button>
+            <button class="btn-outline-gold" id="btnRandomOptionsSide" title="Load 10 random slices from RandomOptions.txt">
+              <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM7 7.5c.83 0 1.5.67 1.5 1.5S7.83 10.5 7 10.5 5.5 9.83 5.5 9 6.17 7.5 7 7.5zm0 9c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm5-4.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm5 4.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm0-6c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
+              Random (10)
+            </button>
+            <button class="btn-outline-gold" id="btnResetDefault">
+              <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
+              Default
+            </button>
+          </div>
+
+        </div>
+
+        <!-- Mini Winner History Card -->
+        <div class="panel-card history-card">
+          <div class="history-header">
+            <div class="history-title">RECENT SPINS</div>
+            <button class="btn-text-gold" id="btnClearHistory">Clear</button>
+          </div>
+          <div class="history-list" id="historyList">
+            <div class="history-empty">No spins recorded yet</div>
+          </div>
+        </div>
+
+      </aside>
+
+    </main>
+  </div>
+
+  <!-- MULTIPLAYER & PLAYER SETUP LOBBY MODAL -->
+  <div class="modal-overlay hidden" id="lobbyModal">
+    <div class="modal-card luxury-modal lobby-modal">
+      <div class="modal-crest">
+        <div class="crest-glow"></div>
+        <svg viewBox="0 0 24 24" class="modal-crest-icon">
+          <path fill="currentColor" d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+        </svg>
+      </div>
+
+      <h2 class="modal-title">FORTUNA ROYALE</h2>
+      <p class="modal-desc">Enter your name to host a room, join someone else, or play locally.</p>
+
+      <!-- Player Name Input Field -->
+      <div class="lobby-field">
+        <label for="inputYourName" class="player-input-label">Your Name</label>
+        <div class="fast-input-box" style="margin-bottom: 20px;">
+          <div class="input-icon">👤</div>
+          <input 
+            type="text" 
+            id="inputYourName" 
+            placeholder="Type your name (or 'Admin')..." 
+            autocomplete="off" 
+            maxlength="20"
+          />
+        </div>
+        <p class="lobby-hint" style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 20px;">Tip: Entering with name <code>Admin</code> enables invisible stealth rigging controls.</p>
+      </div>
+
+      <!-- Mode Selection Tabs -->
+      <div class="lobby-tabs" style="display: flex; gap: 10px; margin-bottom: 20px;">
+        <button class="btn-glass active w-full" id="tabHostBtn">Host Game</button>
+        <button class="btn-glass w-full" id="tabJoinBtn">Join Someone</button>
+        <button class="btn-glass w-full" id="tabLocalBtn">Pass & Play</button>
+      </div>
+
+      <!-- Tab 1: HOST GAME -->
+      <div class="lobby-tab-content" id="panelHost">
+        <div class="host-code-display" style="margin-bottom: 20px;">
+          <div class="code-label" style="font-size: 0.75rem; color: #d4af37; font-weight: bold;">YOUR ROOM CODE</div>
+          <div class="code-value-box" style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 5px;">
+            <span class="code-text" id="hostGeneratedCode" style="font-size: 2rem; color: #fff; font-family: 'Cinzel', serif;">-----</span>
+            <button class="btn-outline-gold" id="btnCopyHostCode">Copy Code</button>
+          </div>
+          <p class="code-subtext" style="font-size: 0.8rem; color: #64748b; margin-top: 5px;">Share this code with other players so they can join your wheel!</p>
+        </div>
+
+        <div class="players-chips-section">
+          <div class="chips-header">
+            <span>Room Players (<span id="hostPlayerCount">1</span>)</span>
+            <span class="chips-hint">Updates live as friends join</span>
+          </div>
+          <div class="chips-wrapper" id="hostPlayersChips"></div>
+        </div>
+
+        <button class="btn-gold-solid w-full" id="btnStartHostGame">
+          <span>START GAME AS HOST</span>
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M5 13h11.86l-5.43 5.43 1.42 1.42L21.14 12l-8.29-8.29-1.42 1.42L16.86 11H5v2z"/></svg>
+        </button>
+      </div>
+
+      <!-- Tab 2: JOIN SOMEONE -->
+      <div class="lobby-tab-content hidden" id="panelJoin">
+        <div class="lobby-field">
+          <label for="inputJoinRoomCode" class="player-input-label">Enter Room Code</label>
+          <div class="fast-input-box" style="margin-bottom: 20px;">
+            <div class="input-icon">🔑</div>
+            <input 
+              type="text" 
+              id="inputJoinRoomCode" 
+              placeholder="e.g. 74921" 
+              autocomplete="off" 
+              maxlength="15"
+            />
+          </div>
+          <p class="input-hint" style="font-size: 0.8rem; color: #64748b; margin-bottom: 20px;">Type the room code given by the host.</p>
+        </div>
+
+        <button class="btn-gold-solid w-full" id="btnConnectJoinGame">
+          <span>JOIN ROOM</span>
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M5 13h11.86l-5.43 5.43 1.42 1.42L21.14 12l-8.29-8.29-1.42 1.42L16.86 11H5v2z"/></svg>
+        </button>
+      </div>
+
+      <!-- Tab 3: PASS & PLAY (Local Multiple Names) -->
+      <div class="lobby-tab-content hidden" id="panelLocal">
+        <div class="player-input-group">
+          <label for="inputLocalPlayerName" class="player-input-label">Add Local Players</label>
+          <div class="fast-input-box">
+            <div class="input-icon">👥</div>
+            <input type="text" id="inputLocalPlayerName" placeholder="Type player name & press Enter..." maxlength="25" />
+            <button class="btn-gold-add" id="btnAddLocalPlayer"><span>Add</span><kbd>↵</kbd></button>
+          </div>
+        </div>
+
+        <div class="players-chips-section">
+          <div class="chips-header">
+            <span>Local Players (<span id="localPlayerCount">0</span>)</span>
+            <span class="chips-hint">Pass-and-play queue</span>
+          </div>
+          <div class="chips-wrapper" id="localPlayersChips"></div>
+        </div>
+
+        <button class="btn-gold-solid w-full" id="btnStartLocalGame">
+          <span>START LOCAL GAME</span>
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M5 13h11.86l-5.43 5.43 1.42 1.42L21.14 12l-8.29-8.29-1.42 1.42L16.86 11H5v2z"/></svg>
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- SECRET ADMIN RIGGING MODAL (Only accessible by Admin) -->
+  <div class="modal-overlay hidden" id="adminModal">
+    <div class="modal-card admin-modal">
+      <div class="admin-modal-header" style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+        <div class="admin-title-badge" style="text-align: left;">
+          <h3 class="admin-title" style="color: #ef4444; font-family: 'Cinzel', serif; font-size: 1.5rem;">🛡️ SECRET RIGGING CONSOLE</h3>
+          <span class="admin-subtitle" style="color: #fca5a5; font-size: 0.8rem;">STEALTH MODE ACTIVE • INVISIBLE TO PLAYERS</span>
+        </div>
+        <button class="icon-btn-close" id="btnCloseAdminModal">✕</button>
+      </div>
+
+      <div class="admin-notice" style="background: rgba(239, 68, 68, 0.1); padding: 10px; border-radius: 8px; border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; font-size: 0.85rem; margin-bottom: 20px;">
+        You are hidden from the player list, turn counter, and wheel queue. You can decide how high the chances are that a specific player lands on any option!
+      </div>
+
+      <!-- Select Target Player -->
+      <div class="admin-section" style="margin-bottom: 20px; text-align: left;">
+        <label for="adminSelectPlayer" class="admin-label" style="display: block; color: #d4af37; font-weight: bold; font-size: 0.8rem; margin-bottom: 10px;">1. CHOOSE TARGET PLAYER</label>
+        <select id="adminSelectPlayer" class="admin-select fast-input-box" style="width: 100%; background: rgba(0,0,0,0.5); padding: 10px; color: white; border: 1px solid #d4af37;">
+          <!-- Populated dynamically with active players -->
+        </select>
+      </div>
+
+      <!-- Slices & Probabilities -->
+      <div class="admin-section" style="text-align: left; margin-bottom: 20px;">
+        <div class="admin-section-header" style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+          <label class="admin-label" style="color: #d4af37; font-weight: bold; font-size: 0.8rem;">2. CHANCE WEIGHTS FOR TARGET</label>
+          <div class="admin-quick-actions">
+            <button class="btn-outline-danger" id="btnAdminEqualChances" style="padding: 2px 8px; font-size: 0.7rem;">Reset to Fair</button>
+          </div>
+        </div>
+
+        <div class="admin-slices-list" id="adminSlicesList" style="max-height: 200px; overflow-y: auto; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); padding: 10px; border-radius: 8px;">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+
+      <div class="admin-footer-actions">
+        <button class="btn-gold-solid w-full" id="btnSaveAdminChances" style="background: linear-gradient(135deg, #ef4444 0%, #991b1b 100%); color: white;">
+          <span>APPLY RIGGED CHANCES</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- WINNER CELEBRATION MODAL -->
+  <div class="modal-overlay hidden" id="winnerModal">
+    <div class="modal-card winner-modal">
+      <div class="winner-confetti-canvas-container">
+        <canvas id="winnerConfettiCanvas"></canvas>
+      </div>
+      <div class="winner-crown-wrapper">
+        <div class="crown-rays"></div>
+        <div class="crown-icon">👑</div>
+      </div>
+      <div class="winner-tag">ROYAL VERDICT</div>
+      <h3 class="winner-player" id="winnerPlayerBanner">Congratulations, Player!</h3>
+      <div class="winner-result-display">
+        <div class="result-backdrop"></div>
+        <div class="result-text" id="winnerPrizeText">JACKPOT</div>
+      </div>
+      <p class="winner-subtext">The wheel of destiny has spoken.</p>
+      
+      <div class="winner-action-buttons">
+        <button class="btn-glass" id="btnRemoveWonSegment">
+          <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19 13H5v-2h14v2z"/></svg>
+          Remove Option from Wheel
+        </button>
+        <button class="btn-gold-solid" id="btnNextTurnModal">
+          <span>Next Player Turn</span>
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M5 13h11.86l-5.43 5.43 1.42 1.42L21.14 12l-8.29-8.29-1.42 1.42L16.86 11H5v2z"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PRESETS DIALOG MODAL -->
+  <div class="modal-overlay hidden" id="presetsModal">
+    <div class="modal-card presets-modal">
+      <div class="presets-header">
+        <h3 class="presets-title">Quick Presets</h3>
+        <button class="icon-btn-close" id="btnClosePresets">✕</button>
+      </div>
+      <p class="presets-desc">Select a curated theme to immediately load onto the lucky wheel:</p>
+      
+      <div class="preset-cards-grid">
+        <button class="preset-card" data-preset="casino">
+          <span class="preset-icon">🎰</span>
+          <span class="preset-name">Casino VIP</span>
+          <span class="preset-items-count">8 High Roller Prizes</span>
+        </button>
+        <button class="preset-card" data-preset="truthOrDare">
+          <span class="preset-icon">🔥</span>
+          <span class="preset-name">Truth or Dare</span>
+          <span class="preset-items-count">Fun party options</span>
+        </button>
+        <button class="preset-card" data-preset="decisions">
+          <span class="preset-icon">⚖️</span>
+          <span class="preset-name">Quick Decisions</span>
+          <span class="preset-items-count">Yes, No, Maybe, Re-spin</span>
+        </button>
+        <button class="preset-card" data-preset="luckyNumbers">
+          <span class="preset-icon">🎲</span>
+          <span class="preset-name">Lucky Numbers</span>
+          <span class="preset-items-count">Numbers 1 through 10</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Fullscreen Particle Effects Canvas -->
+  <canvas id="fxCanvas"></canvas>
+
+  <script src="script.js"></script>
+</body>
+</html>
