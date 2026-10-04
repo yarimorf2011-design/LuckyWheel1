@@ -1,12 +1,12 @@
 /**
- * FORTUNA ROYALE - ULTRA HIGH PERFORMANCE LUXURY LUCKY WHEEL
- * 120 FPS Offscreen Canvas Prerendering, Web Audio API, Zero Bloat
+ * FORTUNA ROYALE - MULTIPLAYER LIVE SYNC EDITION
+ * 120 FPS Offscreen Canvas Prerendering, Web Audio API, PeerJS Real-Time Sync
  */
 
 (function () {
   'use strict';
 
-  // --- AUDIO SYNTHESIZER (Low-latency Web Audio API) ---
+  // --- AUDIO SYNTHESIZER ---
   class SoundManager {
     constructor() {
       this.enabled = true;
@@ -110,7 +110,6 @@
     }
   }
 
-  // --- 3 LUXURY STYLES PALETTES ---
   const THEME_PALETTES = {
     royalGold: [
       { bg: '#1c1b18', text: '#ffd97d', border: '#785f26' }, 
@@ -148,7 +147,6 @@
     return THEME_PALETTES[state.theme] || THEME_PALETTES.royalGold;
   }
 
-  // --- DEFAULT PRESETS ---
   const PRESETS = {
     casino: [
       '👑 1,000,000 GOLD', '💎 DIAMOND CHEST', '🌟 50,000 GOLD', '🃏 FREE RE-SPIN',
@@ -169,7 +167,7 @@
     ]
   };
 
-  // --- STATE ---
+  // --- GLOBAL STATE ---
   const state = {
     theme: 'royalGold',
     players: [],
@@ -177,8 +175,8 @@
     roundNumber: 1,
     segments: [...PRESETS.casino],
     history: [],
+    isAdmin: false,
     
-    // Physics
     currentAngle: 0,
     isSpinning: false,
     spinStartTime: 0,
@@ -187,7 +185,6 @@
     targetAngle: 0,
     lastTickIndex: -1,
 
-    // Admin Rigging
     adminRig: {
       active: false,
       targetPlayer: '',
@@ -196,16 +193,198 @@
     }
   };
 
-  // --- MULTIPLAYER MOCK STATE ---
+  // --- MULTIPLAYER P2P ENGINE (PeerJS) ---
   const mp = {
-    localQueue: []
+    peer: null,
+    conns: [], 
+    hostConn: null, 
+    mode: 'local', 
+    roomCode: null,
+    myName: '',
+    localQueue: [],
+
+    initHost: function(name, code) {
+      this.mode = 'host';
+      this.roomCode = code;
+      
+      this.peer = new Peer('FR-' + code);
+      
+      this.peer.on('open', (id) => {
+          elements.hostGeneratedCode.textContent = code;
+          elements.roomStatusBadge.classList.remove('hidden');
+          document.getElementById('displayRoomCode').textContent = code;
+          
+          if (name !== 'Admin') state.players = [name];
+          else state.players = []; 
+          
+          updateLobbyPlayersList();
+      });
+
+      this.peer.on('connection', (conn) => {
+          this.conns.push(conn);
+          document.getElementById('displayPeerCount').textContent = `${this.conns.length + 1} online`;
+          
+          conn.on('data', (data) => this.handleHostData(conn, data));
+          conn.on('close', () => {
+              this.conns = this.conns.filter(c => c !== conn);
+              document.getElementById('displayPeerCount').textContent = `${this.conns.length + 1} online`;
+          });
+      });
+      
+      this.peer.on('error', (err) => {
+          console.error(err);
+          if (err.type === 'unavailable-id') {
+              alert('Room code collision! Please refresh and host a new code.');
+          }
+      });
+    },
+
+    initJoin: function(name, code) {
+      this.mode = 'join';
+      this.roomCode = code;
+      this.peer = new Peer();
+      
+      this.peer.on('open', (id) => {
+          const conn = this.peer.connect('FR-' + code, { reliable: true });
+          this.hostConn = conn;
+          
+          conn.on('open', () => {
+              conn.send({ type: 'JOIN', name: name, isAdmin: state.isAdmin });
+              elements.wheelStatusText.textContent = `Joined Room ${code}. Waiting for sync...`;
+              elements.roomStatusBadge.classList.remove('hidden');
+              document.getElementById('displayRoomCode').textContent = code;
+              
+              hideLobbyModal();
+              applyGuestRestrictions();
+          });
+          
+          conn.on('data', (data) => this.handleJoinerData(data));
+          
+          conn.on('close', () => {
+              alert('Host disconnected.');
+              location.reload();
+          });
+      });
+      
+      this.peer.on('error', (err) => {
+          alert('Connection Error: ' + err.message);
+          elements.btnConnectJoinGame.disabled = false;
+          elements.btnConnectJoinGame.innerHTML = '<span>JOIN ROOM</span>';
+      });
+    },
+
+    broadcast: function(data) {
+      if (this.mode === 'host') {
+          this.conns.forEach(conn => {
+              if (conn.open) conn.send(data);
+          });
+      } else if (this.mode === 'join' && this.hostConn && this.hostConn.open) {
+          this.hostConn.send(data); 
+      }
+    },
+
+    broadcastState: function() {
+      this.broadcast({
+          type: 'STATE_UPDATE',
+          state: {
+              players: state.players,
+              segments: state.segments,
+              theme: state.theme,
+              history: state.history,
+              currentPlayerIndex: state.currentPlayerIndex,
+              roundNumber: state.roundNumber
+          }
+      });
+    },
+
+    handleHostData: function(conn, data) {
+      switch(data.type) {
+          case 'JOIN':
+              if (!data.isAdmin) {
+                  addPlayer(data.name, true); 
+              }
+              // Send live sync to the new client
+              conn.send({
+                  type: 'FULL_STATE',
+                  state: {
+                      players: state.players,
+                      segments: state.segments,
+                      theme: state.theme,
+                      history: state.history,
+                      currentPlayerIndex: state.currentPlayerIndex,
+                      roundNumber: state.roundNumber
+                  }
+              });
+              this.broadcastState();
+              break;
+          case 'REQUEST_SPIN':
+              if (!state.isSpinning) spinWheelHostLogic(data.playerName);
+              break;
+          case 'UPDATE_SEGMENTS':
+              if (data.isAdmin) {
+                  state.segments = data.segments;
+                  renderSegmentList();
+                  this.broadcastState();
+              }
+              break;
+          case 'UPDATE_THEME':
+              if (data.isAdmin) {
+                  setTheme(data.theme, true);
+                  this.broadcastState();
+              }
+              break;
+          case 'ADVANCE_TURN':
+              if (data.isAdmin) {
+                  advanceTurn(true);
+                  this.broadcastState();
+              }
+              break;
+          case 'REMOVE_SEGMENT':
+              if (data.isAdmin) {
+                 removeSegment(data.index, true);
+              }
+              break;
+          case 'CLEAR_HISTORY':
+              if (data.isAdmin) {
+                  state.history = [];
+                  renderHistory();
+                  this.broadcastState();
+              }
+              break;
+          case 'ADMIN_RIG':
+              if (data.isAdmin) state.adminRig = data.rig;
+              break;
+      }
+    },
+
+    handleJoinerData: function(data) {
+      switch(data.type) {
+          case 'FULL_STATE':
+          case 'STATE_UPDATE':
+              state.players = data.state.players;
+              state.segments = data.state.segments;
+              state.history = data.state.history;
+              state.currentPlayerIndex = data.state.currentPlayerIndex;
+              state.roundNumber = data.state.roundNumber;
+              
+              if (state.theme !== data.state.theme) setTheme(data.state.theme, true);
+              else renderSegmentList();
+              
+              updateTurnBanner();
+              renderHistory();
+              updateAdminDropdowns();
+              break;
+          case 'SPIN_START':
+              executeClientSpin(data.targetAngle, data.spinDuration, data.playerName);
+              break;
+      }
+    }
   };
 
   const sound = new SoundManager();
 
-  // --- DOM ELEMENTS ---
+  // --- DOM MAP ---
   const elements = {
-    // Header & Info
     turnBanner: document.getElementById('turnBanner'),
     turnAvatarInitial: document.getElementById('turnAvatarInitial'),
     currentTurnName: document.getElementById('currentTurnName'),
@@ -216,19 +395,20 @@
     btnSoundToggle: document.getElementById('btnSoundToggle'),
     soundOnIcon: document.getElementById('soundOnIcon'),
     soundOffIcon: document.getElementById('soundOffIcon'),
+    roomStatusBadge: document.getElementById('roomStatusBadge'),
 
-    // Canvas & Wheel
     wheelCanvas: document.getElementById('wheelCanvas'),
     btnSpin: document.getElementById('btnSpin'),
     tickerPointer: document.getElementById('tickerPointer'),
     studsRing: document.getElementById('studsRing'),
     wheelStatusText: document.getElementById('wheelStatusText'),
     
-    // Buttons
     btnRandomOptions: document.getElementById('btnRandomOptions'),
     btnRandomOptionsSide: document.getElementById('btnRandomOptionsSide'),
     btnShuffleSegments: document.getElementById('btnShuffleSegments'),
     btnPresetsModalOpen: document.getElementById('btnPresetsModalOpen'),
+    styleSwitcher: document.getElementById('styleSwitcher'),
+    
     inputSegment: document.getElementById('inputSegment'),
     btnAddSegment: document.getElementById('btnAddSegment'),
     segmentList: document.getElementById('segmentList'),
@@ -239,7 +419,6 @@
     historyList: document.getElementById('historyList'),
     btnClearHistory: document.getElementById('btnClearHistory'),
 
-    // Lobby Modal
     lobbyModal: document.getElementById('lobbyModal'),
     inputYourName: document.getElementById('inputYourName'),
     tabHostBtn: document.getElementById('tabHostBtn'),
@@ -249,35 +428,29 @@
     panelJoin: document.getElementById('panelJoin'),
     panelLocal: document.getElementById('panelLocal'),
     
-    // Lobby - Host
     hostGeneratedCode: document.getElementById('hostGeneratedCode'),
     btnCopyHostCode: document.getElementById('btnCopyHostCode'),
     hostPlayerCount: document.getElementById('hostPlayerCount'),
     hostPlayersChips: document.getElementById('hostPlayersChips'),
     btnStartHostGame: document.getElementById('btnStartHostGame'),
 
-    // Lobby - Join
     inputJoinRoomCode: document.getElementById('inputJoinRoomCode'),
     btnConnectJoinGame: document.getElementById('btnConnectJoinGame'),
 
-    // Lobby - Local
     inputLocalPlayerName: document.getElementById('inputLocalPlayerName'),
     btnAddLocalPlayer: document.getElementById('btnAddLocalPlayer'),
     localPlayerCount: document.getElementById('localPlayerCount'),
     localPlayersChips: document.getElementById('localPlayersChips'),
     btnStartLocalGame: document.getElementById('btnStartLocalGame'),
 
-    // Admin Modal
     btnAdminSecretMenu: document.getElementById('btnAdminSecretMenu'),
     adminModal: document.getElementById('adminModal'),
     btnCloseAdminModal: document.getElementById('btnCloseAdminModal'),
     adminSelectPlayer: document.getElementById('adminSelectPlayer'),
-    adminTargetPlayerDisplay: document.getElementById('adminTargetPlayerDisplay'),
     btnAdminEqualChances: document.getElementById('btnAdminEqualChances'),
     adminSlicesList: document.getElementById('adminSlicesList'),
     btnSaveAdminChances: document.getElementById('btnSaveAdminChances'),
 
-    // Other Modals
     winnerModal: document.getElementById('winnerModal'),
     winnerPlayerBanner: document.getElementById('winnerPlayerBanner'),
     winnerPrizeText: document.getElementById('winnerPrizeText'),
@@ -298,11 +471,9 @@
   let tickerResetTimeout = null;
   let lastWinningSegment = null;
 
-  // --- LOCAL STORAGE HELPERS ---
   function saveState() {
     try {
       localStorage.setItem('fortuna_segments', JSON.stringify(state.segments));
-      localStorage.setItem('fortuna_players', JSON.stringify(state.players));
       localStorage.setItem('fortuna_theme', state.theme);
     } catch (e) {}
   }
@@ -310,24 +481,53 @@
   function loadState() {
     try {
       const storedTheme = localStorage.getItem('fortuna_theme');
-      if (storedTheme && THEME_PALETTES[storedTheme]) {
-        state.theme = storedTheme;
-      }
+      if (storedTheme && THEME_PALETTES[storedTheme]) state.theme = storedTheme;
+      
       const storedSegments = localStorage.getItem('fortuna_segments');
       if (storedSegments) {
         const parsed = JSON.parse(storedSegments);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          state.segments = parsed;
-        }
-      }
-      const storedPlayers = localStorage.getItem('fortuna_players');
-      if (storedPlayers) {
-        const parsedP = JSON.parse(storedPlayers);
-        if (Array.isArray(parsedP) && parsedP.length > 0) {
-          state.players = parsedP;
-        }
+        if (Array.isArray(parsed) && parsed.length > 0) state.segments = parsed;
       }
     } catch (e) {}
+  }
+
+  // --- GUEST RESTRICTION UI FILTER ---
+  function applyGuestRestrictions() {
+    const isGuest = mp.mode === 'join' && !state.isAdmin;
+    
+    if (isGuest) {
+        document.body.classList.add('is-guest');
+        const hides = [
+            elements.inputSegment.parentElement.parentElement, 
+            elements.btnClearSegments.parentElement, 
+            elements.styleSwitcher,
+            elements.btnManagePlayers,
+            elements.btnNextTurnManual
+        ];
+        hides.forEach(el => { if(el) el.classList.add('hidden'); });
+        
+        const qb = document.querySelector('.quickbar-buttons');
+        if(qb) qb.classList.add('hidden');
+
+        if(elements.btnClearHistory) elements.btnClearHistory.classList.add('hidden');
+    } else {
+        document.body.classList.remove('is-guest');
+        const hides = [
+            elements.inputSegment.parentElement.parentElement,
+            elements.btnClearSegments.parentElement,
+            elements.styleSwitcher,
+            elements.btnManagePlayers,
+            elements.btnNextTurnManual
+        ];
+        hides.forEach(el => { if(el) el.classList.remove('hidden'); });
+        
+        const qb = document.querySelector('.quickbar-buttons');
+        if(qb) qb.classList.remove('hidden');
+
+        if(elements.btnClearHistory) elements.btnClearHistory.classList.remove('hidden');
+    }
+    
+    renderSegmentList();
   }
 
   // --- AMBIENT PARTICLES ---
@@ -627,7 +827,7 @@
     renderAdminSlices();
   }
 
-  // --- PHYSICS ENGINE & ADMIN RIGGING ---
+  // --- PHYSICS ENGINE & SYNCED RIGGING ---
   function getActivePointerSegmentIndex(currentAngle) {
     if (state.segments.length === 0) return 0;
     const total = state.segments.length;
@@ -642,21 +842,23 @@
     if (state.isSpinning) return;
     if (state.segments.length < 2) {
       alert('Please add at least 2 options on the wheel to spin!');
-      elements.inputSegment.focus();
       return;
     }
-    if (state.players.length === 0) {
+    if (state.players.length === 0 && mp.mode !== 'join') {
       showLobbyModal();
       return;
     }
 
-    sound.playWhoosh();
-    state.isSpinning = true;
-    isAmbientActive = false; 
-    elements.btnSpin.disabled = true;
-    const currentPlayer = getCurrentPlayerName();
-    elements.wheelStatusText.textContent = `Spinning for ${currentPlayer}...`;
+    if (mp.mode === 'join') {
+        mp.broadcast({ type: 'REQUEST_SPIN', playerName: state.isAdmin ? 'Admin' : mp.myName });
+    } else {
+        spinWheelHostLogic(state.isAdmin ? 'Admin' : getCurrentPlayerName());
+    }
+  }
 
+  function spinWheelHostLogic(spinnerName) {
+    state.isSpinning = true;
+    
     const minTurns = 6;
     const maxTurns = 9;
     const turns = minTurns + Math.random() * (maxTurns - minTurns);
@@ -665,8 +867,9 @@
     state.startAngle = state.currentAngle;
     let targetAngleFinal = state.startAngle + turns * Math.PI * 2 + randomAngleOffset;
 
-    // ----- ADMIN RIGGING INJECTION -----
-    if (state.adminRig.active && state.adminRig.targetPlayer === currentPlayer) {
+    // Admin Rigging Calculation (Host Side Only)
+    const playerToRig = getCurrentPlayerName();
+    if (state.adminRig.active && state.adminRig.targetPlayer === playerToRig) {
       const chance = state.adminRig.chance; 
       if (Math.random() * 100 <= chance) {
         let targetSliceIndex = state.adminRig.targetSliceIndex;
@@ -687,10 +890,34 @@
         }
       }
     }
-    // -----------------------------------
 
-    state.targetAngle = targetAngleFinal;
-    state.spinDuration = 4800 + Math.random() * 1000;
+    const spinDuration = 4800 + Math.random() * 1000;
+
+    if (mp.mode === 'host') {
+        mp.broadcast({
+            type: 'SPIN_START',
+            targetAngle: targetAngleFinal,
+            spinDuration: spinDuration,
+            playerName: spinnerName 
+        });
+    }
+
+    executeClientSpin(targetAngleFinal, spinDuration, spinnerName);
+  }
+
+  function executeClientSpin(targetAngle, duration, spinnerName) {
+    if (!state.isSpinning && mp.mode === 'join') state.isSpinning = true;
+    
+    sound.playWhoosh();
+    isAmbientActive = false; 
+    elements.btnSpin.disabled = true;
+    
+    const playerText = (spinnerName && spinnerName !== 'Admin') ? spinnerName : getCurrentPlayerName();
+    elements.wheelStatusText.textContent = `Spinning for ${playerText}...`;
+
+    state.startAngle = state.currentAngle;
+    state.targetAngle = targetAngle;
+    state.spinDuration = duration;
     state.spinStartTime = performance.now();
     state.lastTickIndex = getActivePointerSegmentIndex(state.currentAngle);
 
@@ -762,7 +989,8 @@
     const currentPlayer = getCurrentPlayerName();
     elements.wheelStatusText.textContent = `Result: ${winningPrize}!`;
 
-    addHistoryRecord(currentPlayer, winningPrize);
+    addHistoryRecordLocal(currentPlayer, winningPrize);
+    
     sound.playWinFanfare();
     triggerConfettiBurst();
     showWinnerModal(currentPlayer, winningPrize);
@@ -779,13 +1007,10 @@
     elements.currentTurnName.textContent = playerName;
     elements.turnAvatarInitial.textContent = playerName.charAt(0).toUpperCase() || '?';
     elements.turnRoundBadge.textContent = `Round ${state.roundNumber}`;
-    const pCount = state.players.length;
-    
-    if (elements.playerCountBadge) elements.playerCountBadge.textContent = pCount;
-    if (elements.modalPlayerCount) elements.modalPlayerCount.textContent = pCount;
+    if (elements.playerCountBadge) elements.playerCountBadge.textContent = state.players.length;
   }
 
-  function advanceTurn() {
+  function advanceTurn(fromNetwork = false) {
     if (state.players.length === 0) return;
     state.currentPlayerIndex++;
     if (state.currentPlayerIndex >= state.players.length) {
@@ -794,6 +1019,11 @@
     }
     updateTurnBanner();
     elements.wheelStatusText.textContent = `Ready for ${getCurrentPlayerName()}'s spin`;
+
+    if (!fromNetwork && mp.mode !== 'local') {
+        if (mp.mode === 'host') mp.broadcastState();
+        else if (state.isAdmin) mp.broadcast({ type: 'ADVANCE_TURN', isAdmin: true });
+    }
   }
 
   // --- LOBBY AND MULTIPLAYER FLOW ---
@@ -833,19 +1063,22 @@
 
   function checkAdminLogin(name) {
     if (name.trim().toLowerCase() === 'admin') {
+      state.isAdmin = true;
       elements.btnAdminSecretMenu.classList.remove('hidden');
-      hideLobbyModal();
       elements.wheelStatusText.textContent = "Admin Stealth Rigging Unlocked.";
       return true;
     }
     return false;
   }
 
-  // Local Play Functions
+  // Local Play
   function addLocalPlayer(name) {
     const clean = name.trim();
     if (!clean) return;
-    if (checkAdminLogin(clean)) return;
+    if (checkAdminLogin(clean)) {
+        hideLobbyModal();
+        return;
+    }
     mp.localQueue.push(clean);
     elements.inputLocalPlayerName.value = '';
     renderLocalPlayerChips();
@@ -879,43 +1112,83 @@
   }
 
   function startLocalGame() {
+    const name = elements.inputYourName.value.trim();
+    if (checkAdminLogin(name)) return hideLobbyModal();
+    
     if (mp.localQueue.length > 0) {
       state.players = [...mp.localQueue];
-      saveState();
-    } else if (state.players.length === 0) {
-      state.players.push('Player 1');
+    } else {
+      if (name && name.toLowerCase() !== 'admin') {
+          state.players = [name];
+      } else if (state.players.length === 0) {
+          state.players = ['Player 1'];
+      }
     }
     hideLobbyModal();
   }
 
+  // Host & Join Simulation Triggers
   function simulateHost() {
     const name = elements.inputYourName.value.trim();
     if (!name) return alert("Enter your name first!");
-    if (checkAdminLogin(name)) return;
+    
+    if (checkAdminLogin(name)) {
+        mp.myName = 'Admin';
+    } else {
+        mp.myName = name;
+        state.isAdmin = false;
+    }
+
+    if (mp.mode === 'host') return; 
     
     let code = Math.floor(10000 + Math.random() * 90000).toString();
-    elements.hostGeneratedCode.textContent = code;
-    
-    state.players = [name];
-    elements.hostPlayersChips.innerHTML = `
-      <div class="player-chip">
-        <span class="player-chip-badge">1</span>
-        <span>${escapeHtml(name)} (Host)</span>
-      </div>
-    `;
+    mp.initHost(mp.myName, code);
     switchLobbyTab('host');
   }
 
   function simulateJoin() {
     const name = elements.inputYourName.value.trim();
     const code = elements.inputJoinRoomCode.value.trim();
-    if (!name) return alert("Enter your name first!");
-    if (checkAdminLogin(name)) return;
-    if (!code) return alert("Enter a room code!");
     
-    state.players = ['Host', name];
-    hideLobbyModal();
-    alert(`Successfully joined room ${code}!`);
+    if (!name) return alert("Enter your name first!");
+    if (!code) return alert("Enter a room code!");
+
+    if (checkAdminLogin(name)) {
+        mp.myName = 'Admin';
+    } else {
+        mp.myName = name;
+        state.isAdmin = false;
+    }
+
+    elements.btnConnectJoinGame.disabled = true;
+    elements.btnConnectJoinGame.innerHTML = '<span>CONNECTING...</span>';
+
+    mp.initJoin(mp.myName, code);
+  }
+
+  function addPlayer(name, fromNetwork = false) {
+    const clean = name.trim();
+    if (!clean) return;
+    state.players.push(clean);
+    updateTurnBanner();
+    updateAdminDropdowns();
+    updateLobbyPlayersList();
+    
+    if (!fromNetwork && mp.mode === 'host') mp.broadcastState();
+  }
+
+  function updateLobbyPlayersList() {
+      const container = elements.hostPlayersChips;
+      if (!container) return;
+      container.innerHTML = '';
+      state.players.forEach((p, idx) => {
+          container.innerHTML += `
+            <div class="player-chip">
+                <span class="player-chip-badge">${idx + 1}</span>
+                <span>${escapeHtml(p)}</span>
+            </div>`;
+      });
+      if (elements.hostPlayerCount) elements.hostPlayerCount.textContent = state.players.length;
   }
 
   // --- ADMIN RIGGING UI ---
@@ -978,6 +1251,21 @@
     }
   }
 
+  function updateAdminDropdowns() {
+      if (!state.isAdmin) return;
+      updateAdminPlayerDropdown();
+      renderAdminSlices();
+  }
+
+  // --- NETWORK SYNC BROADCASTERS ---
+  function broadcastSegmentsChange() {
+      if (mp.mode === 'host') {
+          mp.broadcastState();
+      } else if (mp.mode === 'join' && state.isAdmin) {
+          mp.broadcast({ type: 'UPDATE_SEGMENTS', segments: state.segments, isAdmin: true });
+      }
+  }
+
   // --- SIDEBAR SEGMENTS MANAGEMENT ---
   function renderSegmentList() {
     const list = elements.segmentList;
@@ -993,22 +1281,26 @@
     }
 
     elements.emptySegmentState.classList.add('hidden');
-
+    const isGuest = mp.mode === 'join' && !state.isAdmin;
     const palette = getCurrentPalette();
+
     state.segments.forEach((item, index) => {
       const colorScheme = palette[index % palette.length];
       const div = document.createElement('div');
       div.className = 'segment-item';
+
+      const actionsHtml = isGuest ? '' : `
+        <button class="btn-item-delete" data-index="${index}" title="Remove slice">
+          <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      `;
+
       div.innerHTML = `
         <div class="segment-item-left">
           <div class="segment-color-dot" style="background: ${colorScheme.bg}; border-color: ${colorScheme.border};"></div>
           <span class="segment-text" title="${escapeHtml(item)}">${escapeHtml(item)}</span>
         </div>
-        <div class="segment-actions">
-          <button class="btn-item-delete" data-index="${index}" title="Remove slice">
-            <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-          </button>
-        </div>
+        <div class="segment-actions">${actionsHtml}</div>
       `;
       list.appendChild(div);
     });
@@ -1023,25 +1315,7 @@
     invalidateWheelCache();
   }
 
-  // --- THEME MANAGEMENT ---
-  function setTheme(themeName) {
-    if (!THEME_PALETTES[themeName]) themeName = 'royalGold';
-    state.theme = themeName;
-    document.body.dataset.theme = themeName;
-
-    document.querySelectorAll('.style-pill').forEach((pill) => {
-      if (pill.dataset.theme === themeName) {
-        pill.classList.add('active');
-      } else {
-        pill.classList.remove('active');
-      }
-    });
-
-    saveState();
-    renderSegmentList();
-  }
-
-  function addSegment(text) {
+  function addSegment(text, fromNetwork = false) {
     const clean = text.trim();
     if (!clean) return;
     state.segments.push(clean);
@@ -1049,55 +1323,53 @@
     renderSegmentList();
 
     const container = elements.segmentList.parentElement;
-    if (container) {
-      container.scrollTop = container.scrollHeight;
-    }
+    if (container) container.scrollTop = container.scrollHeight;
+
+    if (!fromNetwork) broadcastSegmentsChange();
   }
 
-  function removeSegment(index) {
+  function removeSegment(index, fromNetwork = false) {
     if (index >= 0 && index < state.segments.length) {
       state.segments.splice(index, 1);
       saveState();
       renderSegmentList();
+      if (!fromNetwork) broadcastSegmentsChange();
     }
   }
 
-  function shuffleSegments() {
+  function shuffleSegments(fromNetwork = false) {
     for (let i = state.segments.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [state.segments[i], state.segments[j]] = [state.segments[j], state.segments[i]];
     }
     saveState();
     renderSegmentList();
+    if (!fromNetwork) broadcastSegmentsChange();
   }
 
-  // --- RANDOM OPTIONS (FROM RandomOptions.txt ONLY) ---
-  // No fallback logic here anymore. It relies entirely on the file.
+  // --- RANDOM OPTIONS (.txt Exclusively) ---
   async function fetchRandomOptionsPool() {
     try {
       const response = await fetch('RandomOptions.txt?t=' + Date.now());
-      if (!response.ok) {
-        throw new Error('HTTP status ' + response.status);
-      }
+      if (!response.ok) throw new Error('HTTP status ' + response.status);
+      
       const text = await response.text();
-      const lines = text
-        .split(/\r?\n/)
+      return text.split(/\r?\n/)
         .map(line => line.trim())
         .filter(line => line.length > 0 && !line.startsWith('#'));
-      
-      return lines;
+        
     } catch (err) {
       console.error('Failed to load RandomOptions.txt', err);
-      alert('Could not load RandomOptions.txt. Ensure the file exists in the same folder and you are running a local web server (like VSCode Live Server).');
+      alert('Could not load RandomOptions.txt. Ensure the file is inside the main folder and you are running via a Local Web Server.');
       return [];
     }
   }
 
-  async function applyRandomOptions() {
+  async function applyRandomOptions(fromNetwork = false) {
     const pool = await fetchRandomOptionsPool();
     if (!pool || pool.length === 0) return;
 
-    // Pick 10 random items from the file
+    // Shuffle & Pick Exactly 10
     const shuffled = [...pool];
     for (let i = shuffled.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -1105,17 +1377,37 @@
     }
 
     const count = Math.min(10, shuffled.length);
-    state.segments = shuffled.slice(0, count); // Overwrites old ones entirely
+    state.segments = shuffled.slice(0, count);
+
+    saveState();
+    renderSegmentList();
+    sound.playWhoosh();
+    elements.wheelStatusText.textContent = `Loaded ${count} random slices from RandomOptions.txt!`;
+
+    if (!fromNetwork) broadcastSegmentsChange();
+  }
+
+  function setTheme(themeName, fromNetwork = false) {
+    if (!THEME_PALETTES[themeName]) themeName = 'royalGold';
+    state.theme = themeName;
+    document.body.dataset.theme = themeName;
+
+    document.querySelectorAll('.style-pill').forEach((pill) => {
+      if (pill.dataset.theme === themeName) pill.classList.add('active');
+      else pill.classList.remove('active');
+    });
 
     saveState();
     renderSegmentList();
 
-    sound.playWhoosh();
-    elements.wheelStatusText.textContent = `Loaded ${count} random slices from RandomOptions.txt!`;
+    if (!fromNetwork && mp.mode !== 'local') {
+        if (mp.mode === 'host') mp.broadcastState();
+        else if (state.isAdmin) mp.broadcast({ type: 'UPDATE_THEME', theme: themeName, isAdmin: true });
+    }
   }
 
   // --- HISTORY MANAGEMENT ---
-  function addHistoryRecord(player, prize) {
+  function addHistoryRecordLocal(player, prize) {
     state.history.unshift({
       player,
       prize,
@@ -1150,6 +1442,16 @@
   function showWinnerModal(player, prize) {
     elements.winnerPlayerBanner.textContent = `Awarded to ${player}!`;
     elements.winnerPrizeText.textContent = prize;
+    
+    // Restrictions for guests
+    if (mp.mode === 'join' && !state.isAdmin) {
+        elements.btnNextTurnModal.querySelector('span').textContent = 'Close Window';
+        elements.btnRemoveWonSegment.classList.add('hidden');
+    } else {
+        elements.btnNextTurnModal.querySelector('span').textContent = 'Next Player Turn';
+        elements.btnRemoveWonSegment.classList.remove('hidden');
+    }
+
     elements.winnerModal.classList.remove('hidden');
   }
 
@@ -1171,6 +1473,7 @@
       saveState();
       renderSegmentList();
       hidePresetsModal();
+      broadcastSegmentsChange();
     }
   }
 
@@ -1182,10 +1485,8 @@
 
   // --- EVENT LISTENERS ---
   function setupEventListeners() {
-    // Wheel Actions
     elements.btnSpin.addEventListener('click', spinWheel);
 
-    // Sidebar Slices Input
     elements.inputSegment.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -1207,17 +1508,14 @@
       }
     });
 
-    // Lobby / Player Mngmt
     if (elements.btnManagePlayers) {
       elements.btnManagePlayers.addEventListener('click', showLobbyModal);
     }
     
-    // Tab Listeners
     if(elements.tabHostBtn) elements.tabHostBtn.addEventListener('click', simulateHost);
     if(elements.tabJoinBtn) elements.tabJoinBtn.addEventListener('click', () => switchLobbyTab('join'));
     if(elements.tabLocalBtn) elements.tabLocalBtn.addEventListener('click', () => switchLobbyTab('local'));
 
-    // Local Pass & Play Tab
     if (elements.inputLocalPlayerName) {
       elements.inputLocalPlayerName.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
@@ -1233,7 +1531,6 @@
       elements.btnStartLocalGame.addEventListener('click', startLocalGame);
     }
 
-    // Host & Join Action Buttons
     if (elements.btnStartHostGame) {
       elements.btnStartHostGame.addEventListener('click', hideLobbyModal);
     }
@@ -1241,11 +1538,24 @@
       elements.btnConnectJoinGame.addEventListener('click', simulateJoin);
     }
 
-    // Admin UI Actions
+    elements.btnCopyHostCode.addEventListener('click', () => {
+        navigator.clipboard.writeText(mp.roomCode || '');
+        elements.btnCopyHostCode.textContent = 'Copied!';
+        setTimeout(() => { elements.btnCopyHostCode.textContent = 'Copy Code'; }, 2000);
+    });
+      
+    if (document.getElementById('btnCopyRoomCode')) {
+        document.getElementById('btnCopyRoomCode').addEventListener('click', (e) => {
+            navigator.clipboard.writeText(mp.roomCode || '');
+            const btn = e.currentTarget;
+            btn.textContent = '✅';
+            setTimeout(() => { btn.textContent = '📋'; }, 2000);
+        });
+    }
+
     if (elements.btnAdminSecretMenu) {
       elements.btnAdminSecretMenu.addEventListener('click', () => {
-        updateAdminPlayerDropdown();
-        renderAdminSlices();
+        updateAdminDropdowns();
         elements.adminModal.classList.remove('hidden');
       });
     }
@@ -1273,14 +1583,19 @@
           alert(`Wheel is rigged! ${state.adminRig.targetPlayer} has a ${state.adminRig.chance}% chance to land on your selected option!`);
         }
         elements.adminModal.classList.add('hidden');
+
+        if (mp.mode === 'join' && state.isAdmin) {
+            mp.broadcast({ type: 'ADMIN_RIG', rig: state.adminRig, isAdmin: true });
+        }
       });
     }
 
-    // Turn Actions
-    elements.btnNextTurnManual.addEventListener('click', advanceTurn);
+    elements.btnNextTurnManual.addEventListener('click', () => advanceTurn());
     elements.btnNextTurnModal.addEventListener('click', () => {
       hideWinnerModal();
-      advanceTurn();
+      if (mp.mode === 'host' || mp.mode === 'local' || state.isAdmin) {
+        advanceTurn();
+      }
     });
 
     elements.btnRemoveWonSegment.addEventListener('click', () => {
@@ -1292,14 +1607,13 @@
       advanceTurn();
     });
 
-    // Random / Shuffle / Clear Tools
-    elements.btnShuffleSegments.addEventListener('click', shuffleSegments);
+    elements.btnShuffleSegments.addEventListener('click', () => shuffleSegments());
 
     if (elements.btnRandomOptions) {
-      elements.btnRandomOptions.addEventListener('click', applyRandomOptions);
+      elements.btnRandomOptions.addEventListener('click', () => applyRandomOptions());
     }
     if (elements.btnRandomOptionsSide) {
-      elements.btnRandomOptionsSide.addEventListener('click', applyRandomOptions);
+      elements.btnRandomOptionsSide.addEventListener('click', () => applyRandomOptions());
     }
 
     elements.btnClearSegments.addEventListener('click', () => {
@@ -1307,6 +1621,7 @@
         state.segments = [];
         saveState();
         renderSegmentList();
+        broadcastSegmentsChange();
       }
     });
 
@@ -1314,11 +1629,17 @@
       state.segments = [...PRESETS.casino];
       saveState();
       renderSegmentList();
+      broadcastSegmentsChange();
     });
 
     elements.btnClearHistory.addEventListener('click', () => {
       state.history = [];
       renderHistory();
+      if (mp.mode === 'host') {
+          mp.broadcastState();
+      } else if (mp.mode === 'join' && state.isAdmin) {
+          mp.broadcast({ type: 'CLEAR_HISTORY', isAdmin: true });
+      }
     });
 
     elements.btnPresetsModalOpen.addEventListener('click', showPresetsModal);
@@ -1330,7 +1651,6 @@
       });
     });
 
-    // Sound
     elements.btnSoundToggle.addEventListener('click', () => {
       sound.enabled = !sound.enabled;
       if (sound.enabled) {
@@ -1343,14 +1663,12 @@
       }
     });
 
-    // Modals Outer Click Close
     [elements.lobbyModal, elements.presetsModal, elements.adminModal].forEach((overlay) => {
       if(overlay) {
         overlay.addEventListener('click', (e) => {
           if (e.target === overlay) {
             overlay.classList.add('hidden');
             if (overlay === elements.lobbyModal && state.players.length === 0) {
-               // Ensure there is at least one player if they close early
                addLocalPlayer('Player 1');
                startLocalGame();
             }
@@ -1359,7 +1677,6 @@
       }
     });
 
-    // Theme Switcher buttons
     document.querySelectorAll('.style-pill').forEach((btn) => {
       btn.addEventListener('click', () => {
         const theme = btn.dataset.theme;
@@ -1368,7 +1685,6 @@
       });
     });
 
-    // Debounced resize
     let resizeTimeout = null;
     window.addEventListener('resize', () => {
       clearTimeout(resizeTimeout);
@@ -1380,6 +1696,10 @@
 
   // --- BOOTSTRAP ---
   function init() {
+    if (typeof Peer === 'undefined') {
+        alert("PeerJS failed to load from network. Multiplayer will not work.");
+    }
+      
     loadState();
     setTheme(state.theme); 
     renderBezelStuds();
@@ -1389,10 +1709,8 @@
     setupEventListeners();
     initAmbientParticles();
 
-    // Show lobby on startup
     showLobbyModal();
     
-    // Check if we need to load any players dynamically 
     if (state.players.length > 0) {
       mp.localQueue = [...state.players];
       renderLocalPlayerChips();
